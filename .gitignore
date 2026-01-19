@@ -1,0 +1,78 @@
+# Environment and Secrets
+.env
+**/.env
+.streamlit/secrets.toml
+config/auth.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+
+# Data files (uploaded/generated) - Keep sample PDFs in root
+*.xlsx
+*.xls
+!Odoo\ Import\ Ready\ (22).xlsx
+po-processor-app/*.pdf
+TNT_PO_Extract/*.pdf
+Odoo-T-T-Test/*.pdf
+
+# Logs
+*.log
+logs/
+
+# Test outputs
+*_data.xlsx
+sales_performance_data.xlsx
+inventory_snapshots_data.xlsx
+supabase_processed_data.xlsx
+
+# Claude assistant files
+.claude/
+
+# Documentation (generated summaries)
+*_SUMMARY.md
+*_IMPLEMENTATION.md
+ZERO_VALUES_FIX_SUMMARY.md
+PRODUCT_IMAGES_IMPLEMENTATION.md
+
+# Keep example files
+!.streamlit/secrets.toml.example
+!.env.example

@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy<1.22.0
+openpyxl
+pdfplumber
+supabase
+pydantic
+pyyaml
+python-dotenv
+requests

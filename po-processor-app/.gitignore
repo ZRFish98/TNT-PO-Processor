@@ -1,0 +1,32 @@
+# Environment and Secrets
+.env
+.streamlit/secrets.toml
+config/auth.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (uploaded/generated)
+*.xlsx
+*.pdf
+*.xls
+
+# Logs
+*.log
+
+# Keep example files
+!.streamlit/secrets.toml.example
