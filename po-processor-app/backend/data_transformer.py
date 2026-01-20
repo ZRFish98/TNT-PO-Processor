@@ -24,21 +24,27 @@ class DataTransformer:
             return 'CW'
         return 'CE'
 
-    def transform_data(self, 
-                     po_df: pd.DataFrame, 
+    def transform_data(self,
+                     po_df: pd.DataFrame,
                      product_variants: List[Dict[str, Any]],
-                     starting_so_ref: int = 391) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
+                     latest_so_number: int) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
         """
         Transform extracted PO data into Odoo-ready format.
-        
+
         Args:
             po_df: DataFrame containing extracted PDF data
             product_variants: List of product dictionaries from Odoo API
-        
+            latest_so_number: The latest SO number in Odoo (e.g., 3270 for OATS003270)
+
         Returns:
             order_summaries: DataFrame (headers)
             order_line_details: DataFrame (lines)
             errors: List of error strings
+
+        Note:
+            Odoo has a bug where when importing N orders, the first order gets
+            Latest + N + 1 instead of Latest + 1. This method calculates SO
+            references based on that buggy behavior.
         """
         errors = []
         
@@ -110,11 +116,18 @@ class DataTransformer:
                     
                     base_units_per_case = matched_products.iloc[0].get('x_studio_tt_om_int', 1.0)
                     total_units_bundle = total_ordered_qty * base_units_per_case
-                    
-                    # Split units
-                    units_this_product = int(total_units_bundle / num_products)
-                    if idx == 0:
-                        units_this_product += int(total_units_bundle % num_products)
+
+                    # Split units evenly with better distribution
+                    # Example: 60 units / 13 products = 4 each + 8 remainder
+                    # Better: First 8 products get 5, remaining 5 products get 4
+                    base_qty = int(total_units_bundle / num_products)
+                    remainder = int(total_units_bundle % num_products)
+
+                    # Distribute remainder across first N products (one extra unit each)
+                    if idx < remainder:
+                        units_this_product = base_qty + 1
+                    else:
+                        units_this_product = base_qty
                         
                     # Calculate unit price
                     # Original code: unit_price = row['Price'] / product['Units Per Order']
@@ -194,13 +207,17 @@ class DataTransformer:
         if not order_line_details.empty:
             # Filter out invalid Store IDs (NaN, 0, etc)
             order_line_details = order_line_details.dropna(subset=['store_id'])
-            
+
             # Sort by Store ID for consistent numbering
             unique_stores = sorted(order_line_details['store_id'].unique().tolist())
-            
+            total_stores = len(unique_stores)
+
             for index, store_id in enumerate(unique_stores):
-                # Generate SO Reference
-                current_ref_num = starting_so_ref + index
+                # Calculate SO Reference using Odoo's buggy formula:
+                # First SO = Latest + Total_Count + 1
+                # Second SO = Latest + Total_Count + 2, etc.
+                # Formula: Latest + Total_Count + (index + 1)
+                current_ref_num = latest_so_number + total_stores + (index + 1)
                 so_ref = f"OATS00{current_ref_num}"
                 store_so_map[store_id] = so_ref
                 

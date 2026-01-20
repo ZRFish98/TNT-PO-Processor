@@ -124,6 +124,10 @@ class PDFExtractor:
                                     numeric_values = []
                                     for part in parts[1:]:
                                         try:
+                                            # Skip if it's a 6-digit number (likely an item code/vendor item number)
+                                            if re.match(r'^\d{6}$', part):
+                                                continue
+                                            # Match numeric values (integers or decimals), but not parts with '/'
                                             if re.match(r'^\d+(?:\.\d+)?$', part) and '/' not in part:
                                                 numeric_values.append(float(part))
                                         except ValueError:

@@ -124,13 +124,7 @@ if page == "Configuration":
             else:
                 st.error("❌ Connection Failed")
     
-    st.divider()
-    st.subheader("Processing Settings")
-    
-    if 'config_start_so' not in st.session_state:
-        st.session_state['config_start_so'] = settings.get('processing', {}).get('starting_so_ref', 391)
-        
-    st.number_input("Starting SO Reference", min_value=1, step=1, key='config_start_so')
+    # Removed "Latest SO Number" from here - moved to Step 3 (Transform & Review)
 
 # --- Page 2: Upload & Extract ---
 elif page == "Upload & Extract":
@@ -190,26 +184,48 @@ elif page == "Transform & Review":
         st.warning("No extracted data found. Please go back to Upload.")
     else:
         if st.session_state['line_details'].empty:
+            # Input for Latest SO Number
+            st.subheader("📋 SO Reference Configuration")
+
+            if 'config_latest_so' not in st.session_state:
+                st.session_state['config_latest_so'] = None
+
+            latest_so_input = st.number_input(
+                "Latest SO Number in Odoo (e.g., if latest is OATS003270, enter 3270)",
+                min_value=1,
+                step=1,
+                value=st.session_state.get('config_latest_so'),
+                placeholder="Enter the latest SO number...",
+                help="Enter the numeric part of the latest SO reference in Odoo. The app will calculate new SO numbers based on Odoo's import behavior."
+            )
+
+            # Store in session state
+            st.session_state['config_latest_so'] = latest_so_input
+
+            st.divider()
+
             if st.button("Fetch Attributes & Transform"):
                 if not st.session_state['odoo_client']:
                     st.error("Please connect to Odoo first in Configuration")
+                elif not latest_so_input:
+                    st.error("⚠️ Please enter the Latest SO Number in Odoo above")
                 else:
                     with st.spinner("Fetching product data from Odoo and transforming..."):
                         # Get Unique Internal Refs
                         refs = st.session_state['extracted_po_data']['Internal Reference'].unique().astype(str).tolist()
-                        
+
                         # Fetch Product Data
                         products = st.session_state['odoo_client'].get_products(internal_references=refs)
-                        
+
                         # Transform
                         transformer = DataTransformer(settings)
-                        start_ref = st.session_state.get('config_start_so', 391)
+                        latest_so = st.session_state.get('config_latest_so')
                         summary, details, logs = transformer.transform_data(
-                            st.session_state['extracted_po_data'], 
+                            st.session_state['extracted_po_data'],
                             products,
-                            starting_so_ref=start_ref
+                            latest_so_number=latest_so
                         )
-                        
+
                         st.session_state['order_summaries'] = summary
                         st.session_state['line_details'] = details
                         st.session_state['transform_errors'] = logs
@@ -218,8 +234,24 @@ elif page == "Transform & Review":
         else:
             # Display Data
             st.subheader("Order Summaries")
+
+            # Show info about calculated SO references
+            if not st.session_state['order_summaries'].empty:
+                latest_so = st.session_state.get('config_latest_so')
+                total_orders = len(st.session_state['order_summaries'])
+                first_so = latest_so + total_orders + 1
+                last_so = latest_so + total_orders + total_orders
+
+                st.info(
+                    f"📊 **SO Reference Calculation:**\n\n"
+                    f"Latest SO in Odoo: OATS00{latest_so}\n\n"
+                    f"Total orders to import: {total_orders}\n\n"
+                    f"Calculated SO range: OATS00{first_so} → OATS00{last_so}\n\n"
+                    f"*(Based on Odoo's import behavior: Latest + Total + Index)*"
+                )
+
             st.dataframe(st.session_state['order_summaries'])
-            
+
             st.subheader("Line Details (Before Optimization)")
             st.dataframe(st.session_state['line_details'])
             
@@ -424,19 +456,19 @@ elif page == "Inventory Optimization":
 
             # Columns to show in order
             # Order: store_id, store_name, image, price, qty, Flagged?, odoo_available, odoo_on_hand,
-            #        store_on_hand, hist_avg_sales, flag_reason, shortage_details, internal_reference, po_number, product_name
+            #        store_on_hand, hist_avg_sales, flag_reason, shortage_details, barcode, internal_reference, po_number, product_name
             editable_cols = ['price_unit', 'product_uom_qty', 'flagged']
             display_cols = [
                 'store_id', 'store_name', 'product_image',
                 'odoo_available', 'odoo_on_hand', 'store_on_hand', 'hist_avg_sales',
-                'flag_reason', 'shortage_details', 'internal_reference', 'po_number', 'product_name'
+                'flag_reason', 'shortage_details', 'barcode', 'internal_reference', 'po_number', 'product_name'
             ]
 
             # Combine in the requested order
             full_cols = [
                 'store_id', 'store_name', 'product_image', 'price_unit', 'product_uom_qty', 'flagged',
                 'odoo_available', 'odoo_on_hand', 'store_on_hand', 'hist_avg_sales',
-                'flag_reason', 'shortage_details', 'internal_reference', 'po_number', 'product_name'
+                'flag_reason', 'shortage_details', 'barcode', 'internal_reference', 'po_number', 'product_name'
             ]
 
             # Highlight flagged rows
@@ -590,10 +622,10 @@ elif page == "Review & Import":
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             # Sheet 1: Sales Orders (Headers)
-            # Columns: Order Reference, Customer, Order Date, Delivery Date, Client Order Ref
+            # Columns: Customer, Order Date, Delivery Date, Client Order Ref
+            # Note: SO Reference is NOT included - Odoo will auto-generate it
             if not summaries.empty:
                 headers_df = pd.DataFrame({
-                    'Order Reference': summaries['so_reference'],
                     'Customer': summaries['official_name'],
                     'Order Date': summaries['order_date'],
                     'Delivery Date': summaries['delivery_date'],
@@ -602,16 +634,20 @@ elif page == "Review & Import":
                 headers_df.to_excel(writer, sheet_name='Sales Orders', index=False)
             
             # Sheet 2: Sales Order Lines (Details)
-            # Columns: Order Reference, Product, Quantity, Unit Price, Lock Unit Price
+            # Columns: Order Reference, Store, Product (Barcode), Description, Quantity, Unit Price, Lock Unit Price
             if not lines.empty:
                 # Filter flagged items out? User didn't explicitly say. But usually we only import clean rows.
                 # User: "Review and Import".
                 # Let's import logic: "valid_lines = ... [~flagged]"
                 valid_lines = lines[~lines['flagged']].copy()
 
+                # Create store display name (e.g., "T&T Supermarket Inc., Metrotown - 001")
+                valid_lines['store_display'] = valid_lines['store_name'] + ' - ' + valid_lines['store_id'].astype(str).str.zfill(3)
+
                 lines_df = pd.DataFrame({
                     'Order Reference': valid_lines['so_reference'],
-                    'Product': valid_lines['internal_reference'],
+                    'Store': valid_lines['store_display'],
+                    'Product': valid_lines['barcode'],  # Use barcode instead of internal_reference
                     'Description': valid_lines['product_name'],
                     'Quantity': valid_lines['product_uom_qty'],
                     'Unit Price': valid_lines['price_unit'],

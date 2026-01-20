@@ -15,7 +15,7 @@ warehouse_mapping:
 
 processing:
   min_order_qty: 1
-  starting_so_ref: 391
+  # latest_so_number should be entered manually in the UI (no default)
 
 tt_store_names:
   1: 'T&T Supermarket Inc., Metrotown  - 001'
