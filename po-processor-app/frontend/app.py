@@ -13,7 +13,7 @@ load_dotenv()
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from backend.odoo_client import OdooClient
-from backend.supabase_client import SupabaseClient
+from backend.odoo_client import OdooClient
 from backend.pdf_extractor import PDFExtractor
 from backend.data_transformer import DataTransformer
 from backend.inventory_optimizer import InventoryOptimizer
@@ -61,8 +61,6 @@ if 'current_page' not in st.session_state:
     st.session_state['current_page'] = "Configuration"
 if 'odoo_client' not in st.session_state:
     st.session_state['odoo_client'] = None
-if 'supabase_client' not in st.session_state:
-    st.session_state['supabase_client'] = None
 if 'extracted_po_data' not in st.session_state:
     st.session_state['extracted_po_data'] = pd.DataFrame()
 if 'po_errors' not in st.session_state:
@@ -158,21 +156,8 @@ if page == "Configuration":
             else:
                 st.error("❌ Connection Failed")
                 
-    with col2:
-        st.subheader("Supabase Connection")
-        if 'config_sb_url' not in st.session_state:
-            st.session_state['config_sb_url'] = settings.get('supabase', {}).get('url', '')
-            
-        sb_url = st.text_input("Supabase URL", key='config_sb_url')
-        sb_key = st.text_input("Supabase Key", type="password", value=os.getenv('SUPABASE_KEY', ''), key='config_sb_key')
-        
-        if st.button("Connect Supabase"):
-            client = SupabaseClient(sb_url, sb_key)
-            if client.connect():
-                st.session_state['supabase_client'] = client
-                st.success("✅ Connected to Supabase")
-            else:
-                st.error("❌ Connection Failed")
+    
+    # Removed Supabase Connection section
     
     # Removed "Latest SO Number" from here - moved to Step 3 (Transform & Review)
 
@@ -339,52 +324,9 @@ elif page == "Inventory Optimization":
         col1, col2 = st.columns([1, 4])
         with col1:
              if st.button("Run Optimization Engine"):
-                if not st.session_state['supabase_client']:
-                    st.warning("Supabase not connected. Skipping historical data.")
-                    # Still run with 0s
-                    hist_sales = pd.DataFrame()
-                    store_inv = pd.DataFrame()
-                else:
-                    # Fetch Supabase Data
-                    # Ensure we pass the correct keys
-                    refs = st.session_state['line_details']['internal_reference'].unique().astype(str).tolist()
-                    store_ids = st.session_state['line_details']['store_id'].unique().tolist()
-                    # Ensure store_ids are ints
-                    store_ids = [int(s) for s in store_ids if pd.notna(s)]
-                    
-                    with st.spinner("Fetching History from Supabase..."):
-                        hist_sales = st.session_state['supabase_client'].get_historical_sales(store_ids, refs)
-                        store_inv = st.session_state['supabase_client'].get_store_inventory(store_ids, refs)
-
-                    # --- DEBUG VIEW (User Request) ---
-                    with st.expander("🕵️‍♂️ Verify Supabase Data Extraction", expanded=True):
-                        st.info("Please check if the data below looks correct. If tables are empty, no matching data was found.")
-
-                        d_col1, d_col2 = st.columns(2)
-                        with d_col1:
-                            st.markdown("### 📉 Historical Sales (from Supabase)")
-                            if not hist_sales.empty:
-                                st.dataframe(hist_sales)
-                                st.write(f"Rows: {len(hist_sales)}")
-                                st.write(f"Data types: {hist_sales.dtypes.to_dict()}")
-                            else:
-                                st.warning("No Historical Sales Data Found")
-
-                        with d_col2:
-                            st.markdown("### 🏪 Store Inventory (from Supabase)")
-                            if not store_inv.empty:
-                                st.dataframe(store_inv)
-                                st.write(f"Rows: {len(store_inv)}")
-                                st.write(f"Data types: {store_inv.dtypes.to_dict()}")
-                            else:
-                                st.warning("No Store Inventory Data Found")
-
-                        # Show line_details merge keys for comparison
-                        st.markdown("### 🔑 Line Details Merge Keys (Before Merge)")
-                        sample_keys = st.session_state['line_details'][['internal_reference', 'store_id']].head(10)
-                        st.dataframe(sample_keys)
-                        st.write(f"Data types: {sample_keys.dtypes.to_dict()}")
-                    # ---------------------------------
+                # Supabase integration removed. Using empty data for historical sales and store inventory.
+                hist_sales = pd.DataFrame()
+                store_inv = pd.DataFrame()
 
                 transformer = DataTransformer(settings)
                 optimizer = InventoryOptimizer(transformer)
@@ -394,14 +336,6 @@ elif page == "Inventory Optimization":
                     hist_sales,
                     store_inv
                 )
-
-                # Debug: Check if merge worked
-                with st.expander("🔬 Post-Merge Debug Info", expanded=True):
-                    st.write("### After Optimization Merge Results")
-                    sample = optimized_lines[['internal_reference', 'store_id', 'hist_avg_sales', 'store_on_hand']].head(10)
-                    st.dataframe(sample)
-                    st.write(f"Non-zero hist_avg_sales count: {(optimized_lines['hist_avg_sales'] > 0).sum()}")
-                    st.write(f"Non-zero store_on_hand count: {(optimized_lines['store_on_hand'] > 0).sum()}")
 
                 st.session_state['line_details'] = optimized_lines
                 st.success("Optimization Complete")
