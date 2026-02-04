@@ -27,6 +27,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Load CSS
+def local_css(file_name):
+    try:
+        with open(file_name) as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except FileNotFoundError:
+         # Fallback to absolute path if relative fails (useful for deployment)
+         try:
+            abs_path = os.path.join(os.path.dirname(__file__), 'style.css')
+            with open(abs_path) as f:
+                st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+         except Exception:
+             pass
+
+local_css("frontend/style.css")
+
 # Load Settings
 @st.cache_resource
 def load_settings():
@@ -61,7 +77,12 @@ if 'transform_errors' not in st.session_state:
 
 
 # Sidebar Navigation
-st.sidebar.title("Navigation")
+st.sidebar.markdown("""
+    <div style="margin-bottom: 2rem;">
+        <h3 style="margin: 0; font-size: 1.2rem; letter-spacing: 2px; color: #00D1FF; font-family: 'Outfit', sans-serif;">NAVIGATOR</h3>
+        <div style="height: 2px; width: 30px; background: linear-gradient(90deg, #00D1FF, #a100ff); margin-top: 5px;"></div>
+    </div>
+""", unsafe_allow_html=True)
 page = st.sidebar.radio("Go to",
     ["Configuration",
      "Upload & Extract", 
@@ -74,6 +95,35 @@ page = st.sidebar.radio("Go to",
 def next_page(page_name):
     st.session_state['current_page'] = page_name
     st.rerun()
+
+# --- Page Layout & Header ---
+st.markdown("""
+    <div style="display: flex; align-items: center; margin-bottom: 2rem;">
+        <div style="background: linear-gradient(135deg, #00D1FF 0%, #007AFF 100%); padding: 12px; border-radius: 12px; margin-right: 15px; box-shadow: 0 0 20px rgba(0, 209, 255, 0.4);">
+            <span style="font-size: 24px;">🛒</span>
+        </div>
+        <div>
+            <h1 style="margin: 0; padding: 0; line-height: 1;">T&T PO PROCESSOR</h1>
+            <p style="color: #666; font-size: 0.9rem; margin: 0; font-family: 'JetBrains Mono', monospace;">SUPPLY CHAIN AUTOMATION ENGINE v1.2</p>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
+
+# Navigation Indicator (Wizard Style)
+pages = ["Configuration", "Upload & Extract", "Transform & Review", "Inventory Optimization", "Review & Import"]
+current_idx = pages.index(st.session_state['current_page'])
+
+cols = st.columns(len(pages))
+for i, p in enumerate(pages):
+    with cols[i]:
+        if i < current_idx:
+            st.markdown(f'<div class="nav-indicator" style="background:rgba(0, 255, 163, 0.1); border-color: #00FFA3; color:#00FFA3">✓ {p}</div>', unsafe_allow_html=True)
+        elif i == current_idx:
+            st.markdown(f'<div class="nav-indicator nav-indicator-active">{p}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="nav-indicator" style="opacity: 0.5;">{p}</div>', unsafe_allow_html=True)
+
+st.divider()
 
 # --- Page 1: Configuration ---
 if page == "Configuration":

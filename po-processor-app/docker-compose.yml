@@ -1,0 +1,11 @@
+services:
+  po-processor:
+    build: .
+    container_name: po-processor-app
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    restart: always
+    # If the user has a custom domain, they can set it up via Nginx proxy
+    # For now, this exposes the app directly on port 8501
