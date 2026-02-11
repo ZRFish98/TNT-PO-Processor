@@ -1,0 +1,38 @@
+services:
+  po-processor:
+    image: ghcr.io/zrfish98/tnt-po-processor:latest
+    container_name: po-processor-app
+    restart: always
+    networks:
+      - n8n_default
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.po-processor.rule=Host(`internal.atiara.cloud`)
+      - traefik.http.routers.po-processor.tls=true
+      - traefik.http.routers.po-processor.entrypoints=web,websecure
+      - traefik.http.routers.po-processor.tls.certresolver=mytlschallenge
+      - traefik.http.services.po-processor.loadbalancer.server.port=8501
+      - traefik.http.middlewares.po-processor.headers.SSLRedirect=true
+      - traefik.http.middlewares.po-processor.headers.STSSeconds=315360000
+      - traefik.http.middlewares.po-processor.headers.browserXSSFilter=true
+      - traefik.http.middlewares.po-processor.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.po-processor.headers.forceSTSHeader=true
+      - traefik.http.middlewares.po-processor.headers.SSLHost=atiara.cloud
+      - traefik.http.middlewares.po-processor.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.po-processor.headers.STSPreload=true
+      - traefik.http.routers.po-processor.middlewares=po-processor@docker
+    environment:
+      - ODOO_URL=https://evpf.odoo.com
+      - ODOO_DB=evpf
+      - ODOO_USERNAME=${ODOO_USERNAME}
+      - ODOO_API_KEY=${ODOO_API_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  n8n_default:
+    external: true
