@@ -271,21 +271,21 @@ st.divider()
 
 # ── Route to page module ───────────────────────────────────────────────────────
 if page == "Settings":
-    from frontend.pages.p1_settings import render
+    from frontend.views.p1_settings import render
     render(settings, get_gmail_monitor())
 
 elif page == "Dashboard":
-    from frontend.pages.p2_queue import render
+    from frontend.views.p2_queue import render
     render(settings)
 
 elif page == "Transform & Review":
-    from frontend.pages.p3_transform import render
+    from frontend.views.p3_transform import render
     render(settings)
 
 elif page == "Inventory Optimization":
-    from frontend.pages.p4_inventory import render
+    from frontend.views.p4_inventory import render
     render(settings)
 
 elif page == "Export":
-    from frontend.pages.p5_export import render
+    from frontend.views.p5_export import render
     render()
