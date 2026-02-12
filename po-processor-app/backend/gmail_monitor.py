@@ -410,7 +410,7 @@ class GmailMonitor:
                 %s, %s, %s,
                 %s::jsonb, %s, %s
             )
-            ON CONFLICT (gmail_message_id) DO NOTHING
+            ON CONFLICT (gmail_message_id) WHERE gmail_message_id IS NOT NULL DO NOTHING
         """
 
         try:

@@ -81,8 +81,7 @@ def render(settings: dict, gmail_monitor):
                 st.rerun()
 
     with status_col:
-        gstatus = gmail_monitor.get_status()
-        if gstatus["authenticated"]:
+        if gmail_monitor.is_authenticated():
             st.success("Gmail: Connected")
         else:
             st.error("Gmail: Not authorized")
