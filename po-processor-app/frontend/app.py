@@ -3,6 +3,9 @@ import os
 import sys
 from datetime import datetime
 
+# Allow Google OAuth to return more scopes than requested (e.g. previously granted)
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
 import pandas as pd
 import streamlit as st
 import yaml
