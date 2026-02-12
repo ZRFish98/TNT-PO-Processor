@@ -155,16 +155,26 @@ if not st.session_state["odoo_connected"]:
             pass  # Will show as disconnected; user can reconnect from Settings
 
 # ── OAuth callback handler ─────────────────────────────────────────────────────
+# Google redirects back with ?code=... which may land in a NEW Streamlit session
+# (the Flow object from session state is gone). Recreate it from credentials.json.
 _qp = st.query_params
-if "code" in _qp and st.session_state.get("gmail_oauth_flow") is not None:
+if "code" in _qp and os.path.exists(_gmail_creds_path):
     try:
+        from google_auth_oauthlib.flow import Flow as _OAuthFlow
+
+        _redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/") + "/"
+        _flow = _OAuthFlow.from_client_secrets_file(
+            _gmail_creds_path,
+            scopes=["https://www.googleapis.com/auth/gmail.modify"],
+            redirect_uri=_redirect_uri,
+        )
         _monitor = get_gmail_monitor()
-        _monitor.exchange_code_for_token(st.session_state["gmail_oauth_flow"], _qp["code"])
+        _monitor.exchange_code_for_token(_flow, _qp["code"])
         st.session_state["gmail_oauth_flow"] = None
         st.session_state["gmail_auth_url"] = None
         st.query_params.clear()
         _monitor.start()
-        st.success("✅ Gmail authorized and monitoring started!")
+        st.success("Gmail authorized and monitoring started!")
         st.rerun()
     except Exception as _e:
         st.error(f"OAuth callback failed: {_e}")
