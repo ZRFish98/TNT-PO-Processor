@@ -45,6 +45,7 @@ pip install -r requirements.txt
 cd po-processor-app/tests
 python verify_fix_column_merge.py  # Verify column merging logic
 python inspect_excel.py            # Inspect Excel file structure
+python test_complete_flow.py       # End-to-end workflow test
 ```
 
 ## Architecture
@@ -58,22 +59,38 @@ The main application follows a multi-stage processing pipeline implemented in St
 - `backend/data_transformer.py` - Transforms raw PO data into Odoo-ready format with warehouse routing
 - `backend/inventory_optimizer.py` - Optimizes order allocations based on inventory and sales data
 - `backend/odoo_client.py` - XML-RPC client for Odoo API integration
-- `backend/supabase_client.py` - Client for historical sales and inventory data
 
 **Data Models:**
 - `models/schemas.py` - Pydantic models for data validation (PurchaseOrderLine, ProductVariant, SalesOrder, etc.)
 
 **Configuration:**
 - `config/settings.yaml` - Application settings including warehouse mappings and store names
-- `.env` - API credentials (Odoo API key, Supabase key)
+- `.env` - API credentials (Odoo API key)
 
 **Frontend:**
 - `frontend/app.py` - Streamlit UI with 5-page workflow:
-  1. Configuration - Connect to Odoo/Supabase
+  1. Configuration - Connect to Odoo
   2. Upload & Extract - Upload PDFs and extract line items
   3. Transform & Review - Fetch Odoo product data and transform to sales orders
   4. Inventory Optimization - Run allocation logic and review/edit orders
   5. Review & Import - Export to Excel for Odoo import
+
+### Windmill Alternative (po-processor-app/f/po_processor/)
+
+An alternative implementation using Windmill workflow automation platform:
+
+**Scripts:**
+- `pdf_extractor/main.py` - PDF extraction as Windmill script
+- `odoo_process/main.py` - Odoo data fetching and transformation
+- `import_to_odoo/main.py` - Import reviewed orders into Odoo
+
+**App:**
+- `po_app.app.yaml` - Native Windmill app replacing Streamlit frontend
+
+**Common Modules:**
+- `common/odoo_client.py`, `common/data_transformer.py`, `common/schemas.py`, `common/inventory_optimizer.py`
+
+Each script has a `.script.yaml` defining inputs/outputs and a `main.py` with the implementation. Deploy using Windmill CLI (`wmill`).
 
 ### Processing Pipeline Flow
 
@@ -89,11 +106,11 @@ The main application follows a multi-stage processing pipeline implemented in St
    - Converts quantities from "cases" to "units" using `x_studio_tt_om_int` (Units Per Order)
    - Calculates unit prices from case prices
    - Routes orders to CE (Canada East) or CW (Canada West) warehouses based on store ID
-   - Generates SO references starting from configurable number (default: OATS00391)
+   - Generates SO references starting from user-provided latest Odoo SO number
    - Groups orders by store and creates order summaries
 
 3. **Inventory Optimization** (`InventoryOptimizer.optimize_allocations`)
-   - Merges historical sales data and store inventory from Supabase
+   - Accepts historical sales and store inventory DataFrames as parameters
    - Flags items with zero/negative inventory
    - Handles shortage scenarios with proportional allocation
    - Calculates priority scores based on sales velocity and days of supply
@@ -120,27 +137,6 @@ The main application follows a multi-stage processing pipeline implemented in St
 **Store Names:**
 - Store IDs (001-040) map to official names in `config/settings.yaml`
 - Used for creating Odoo customer records
-
-### Supabase Schema
-
-The application expects these tables in Supabase:
-
-**products**
-- `id` (int) - Internal Supabase ID
-- `item_id` (text) - Internal reference (matches Odoo default_code)
-
-**sales_performance**
-- `store_id` (int)
-- `product_id` (int) - Foreign key to products.id
-- `total_quantity_sold` (numeric)
-- Used to calculate average monthly sales
-
-**inventory_snapshots**
-- `store_id` (int)
-- `product_id` (int) - Foreign key to products.id
-- `quantity` (numeric)
-- `snapshot_date` (date)
-- Latest snapshot used for current store inventory
 
 ### Common Pitfalls
 
@@ -173,12 +169,9 @@ When making changes to extraction or transformation logic:
 **Environment Variables (.env):**
 ```
 ODOO_API_KEY=<api_key>
-SUPABASE_KEY=<service_key>
 ```
 
 **Settings (config/settings.yaml):**
-- Odoo connection defaults
-- Supabase project configuration
-- Warehouse-store mappings
-- Starting SO reference number
-- Complete store name mappings
+- Odoo connection defaults (URL and database name)
+- Warehouse-store mappings (`cw_stores` list)
+- Complete store name mappings (`tt_store_names`)

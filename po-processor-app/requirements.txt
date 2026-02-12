@@ -7,3 +7,15 @@ pydantic
 pyyaml
 python-dotenv
 requests
+
+# PostgreSQL
+psycopg2-binary>=2.9.9
+
+# Google OAuth + Gmail API
+google-auth>=2.28.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.120.0
+
+# Auto-refresh for queue page
+streamlit-autorefresh>=1.0.1

@@ -1,10 +1,31 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: po-processor-db
+    restart: always
+    environment:
+      POSTGRES_DB: po_processor
+      POSTGRES_USER: po_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - n8n_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U po_user -d po_processor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   po-processor:
     image: ghcr.io/zrfish98/tnt-po-processor:latest
     container_name: po-processor-app
     restart: always
     networks:
       - n8n_default
+    depends_on:
+      postgres:
+        condition: service_healthy
     labels:
       - traefik.enable=true
       - traefik.http.routers.po-processor.rule=Host(`internal.atiara.cloud`)
@@ -26,6 +47,12 @@ services:
       - ODOO_DB=evpf
       - ODOO_USERNAME=${ODOO_USERNAME}
       - ODOO_API_KEY=${ODOO_API_KEY}
+      - DATABASE_URL=postgresql://po_user:${POSTGRES_PASSWORD}@po-processor-db:5432/po_processor
+      - GMAIL_TOKEN_PATH=/data/gmail/token.json
+      - GMAIL_CREDENTIALS_PATH=/data/gmail/credentials.json
+      - GMAIL_POLL_INTERVAL_SECONDS=300
+    volumes:
+      - gmail_tokens:/data/gmail
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
       interval: 30s
@@ -36,3 +63,9 @@ services:
 networks:
   n8n_default:
     external: true
+
+volumes:
+  postgres_data:
+    driver: local
+  gmail_tokens:
+    driver: local

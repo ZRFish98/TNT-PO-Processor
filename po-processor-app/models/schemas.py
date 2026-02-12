@@ -64,4 +64,24 @@ class SalesOrder(BaseModel):
     lines: List[SalesOrderLine] = []
     warehouse: Literal["CE", "CW"]
     store_id: int
-    client_order_ref: str # PO Number
+    client_order_ref: str  # PO Number
+
+
+class StagedPO(BaseModel):
+    """A PO record stored in the PostgreSQL staging queue."""
+    id: Optional[int] = None
+    source: str = "manual"          # 'gmail' | 'manual'
+    gmail_message_id: Optional[str] = None
+    gmail_subject: Optional[str] = None
+    gmail_received_at: Optional[str] = None
+    original_filename: str
+    po_number: Optional[str] = None
+    store_id: Optional[int] = None
+    store_name: Optional[str] = None
+    order_date: Optional[str] = None
+    delivery_date: Optional[str] = None
+    extracted_data: List[Dict] = []
+    status: str = "unprocessed"     # unprocessed | processing | processed | error
+    error_message: Optional[str] = None
+    created_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None

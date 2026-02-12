@@ -1,7 +1,8 @@
+import re
 import xmlrpc.client
 import ssl
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import os
 from functools import lru_cache
 import time
@@ -160,7 +161,7 @@ class OdooClient:
         """Find partner ID by name"""
         if not self.connected:
             raise ConnectionError("Not connected to Odoo")
-            
+
         domain = [['name', '=', name]]
         partners = self.models.execute_kw(
             self.db, self.uid, self.api_key,
@@ -168,5 +169,130 @@ class OdooClient:
             [domain],
             {'fields': ['id'], 'limit': 1}
         )
-        
+
         return partners[0]['id'] if partners else None
+
+    def get_latest_so_number(self) -> Optional[int]:
+        """
+        Fetch the numeric part of the highest-numbered sale.order name.
+        Assumes SO names follow the pattern OATS00NNNN (e.g. OATS003270 → 3270).
+        Returns None if no matching orders are found or the pattern doesn't match.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            orders = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'sale.order', 'search_read',
+                [[['name', 'like', 'OATS00']]],
+                {'fields': ['name'], 'order': 'name desc', 'limit': 1}
+            )
+
+            if not orders:
+                logger.warning("No OATS00* sales orders found in Odoo")
+                return None
+
+            latest_name = orders[0]['name']
+            match = re.search(r'OATS00(\d+)', latest_name)
+            if match:
+                number = int(match.group(1))
+                logger.info(f"Latest SO: {latest_name} → number {number}")
+                return number
+
+            logger.warning(f"SO name '{latest_name}' did not match expected pattern OATS00NNNN")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching latest SO number: {e}")
+            return None
+
+    def get_open_sales_orders(self, partner_name: str) -> List[Dict[str, Any]]:
+        """
+        Fetch open (non-delivered, non-tester) sale.order records for a specific store.
+
+        Filters:
+        - partner_id.name matches partner_name
+        - delivery_status != 'delivered'
+        - x_studio_tester = False
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            partner_id = self.get_partner_id_by_name(partner_name)
+            if not partner_id:
+                logger.warning(f"Partner not found in Odoo: {partner_name}")
+                return []
+
+            domain = [
+                ['partner_id', '=', partner_id],
+                ['delivery_status', '!=', 'delivered'],
+                ['x_studio_tester', '=', False],
+            ]
+
+            fields = [
+                'name',
+                'partner_id',
+                'warehouse_id',
+                'create_date',
+                'state',
+                'delivery_status',
+                'client_order_ref',
+                'x_studio_delivery_date',
+                'x_studio_tester',
+            ]
+
+            orders = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'sale.order', 'search_read',
+                [domain],
+                {'fields': fields, 'order': 'create_date desc', 'limit': 100}
+            )
+
+            logger.info(f"Found {len(orders)} open SOs for partner: {partner_name}")
+            return orders
+
+        except Exception as e:
+            logger.error(f"Error fetching open SOs for {partner_name}: {e}")
+            return []
+
+    def append_lines_to_order(
+        self, so_id: int, lines: List[Dict[str, Any]]
+    ) -> Tuple[List[int], List[Dict[str, Any]]]:
+        """
+        Append sale.order.line records to an existing sale.order.
+
+        Each dict in lines must contain:
+            product_id: int
+            product_uom_qty: float
+            price_unit: float
+
+        Returns (created_line_ids, failed_lines).
+        Note: XML-RPC has no transaction support — partial writes are possible.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        created_ids = []
+        failed_lines = []
+
+        for i, line in enumerate(lines):
+            try:
+                line_id = self.create_sales_order_line(
+                    order_id=so_id,
+                    product_id=line['product_id'],
+                    qty=line['product_uom_qty'],
+                    price_unit=line['price_unit'],
+                )
+                created_ids.append(line_id)
+            except Exception as e:
+                logger.error(f"Failed to append line {i} (product {line.get('product_id')}) to SO {so_id}: {e}")
+                failed_lines.append({'index': i, 'line': line, 'error': str(e)})
+
+        if failed_lines:
+            logger.warning(
+                f"append_lines_to_order: {len(failed_lines)} of {len(lines)} lines failed for SO {so_id}"
+            )
+
+        return created_ids, failed_lines
