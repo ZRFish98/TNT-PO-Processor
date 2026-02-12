@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 # gmail.modify is required to mark messages as read after processing
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
-# Only fetch unread emails with PDF attachments from the T&T PO sender
-GMAIL_SEARCH_QUERY = 'from:tntpo@tntsupermarket.com is:unread has:attachment filename:pdf'
+# Only fetch unread emails with PDF attachments from the T&T PO sender (last 7 days)
+GMAIL_SEARCH_QUERY = 'from:tntpo@tntsupermarket.com is:unread has:attachment filename:pdf newer_than:7d'
 
 TORONTO_TZ = ZoneInfo("America/Toronto")
 
