@@ -59,14 +59,31 @@ CREATE INDEX IF NOT EXISTS idx_staged_pos_region ON staged_pos(region);
 
 
 def _ensure_schema(conn):
-    """Create tables if they don't exist yet, and run migrations for new columns."""
+    """Create tables if they don't exist yet, and run migrations for new columns.
+
+    Two-phase approach handles both fresh installs and upgrades:
+      1. Run migrations first (adds columns to existing tables).
+         This may fail on a fresh DB where the table doesn't exist — that's fine.
+      2. Run init SQL (CREATE TABLE IF NOT EXISTS + indexes).
+         On fresh DB this creates everything; on existing DB it's a no-op for the
+         table but creates any missing indexes (safe now because columns exist).
+    """
     global _schema_initialized
     if _schema_initialized:
         return
+
+    # Phase 1: migrate existing tables (may fail on fresh install — OK)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_MIGRATE_SQL)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+    # Phase 2: create tables + indexes (columns exist now if table was migrated)
     try:
         with conn.cursor() as cur:
             cur.execute(_INIT_SQL)
-            cur.execute(_MIGRATE_SQL)
         conn.commit()
         _schema_initialized = True
         logger.info("Database schema initialized")
