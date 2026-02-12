@@ -1,8 +1,11 @@
 import os
 from datetime import datetime
 
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+
+from database.connection import get_db_connection
 
 load_dotenv()
 
@@ -157,3 +160,74 @@ def render(settings: dict, gmail_monitor):
         "**OAuth Redirect URI to register in Google Cloud Console:** "
         f"`{os.getenv('APP_BASE_URL', 'http://localhost:8501')}/`"
     )
+
+    st.divider()
+
+    # ── Database Explorer ─────────────────────────────────────────────────────
+    st.subheader("Database Explorer")
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # List all user tables
+                cur.execute(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+                )
+                tables = [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        st.error(f"Cannot connect to database: {e}")
+        return
+
+    if not tables:
+        st.info("No tables found.")
+        return
+
+    table_col, limit_col = st.columns([2, 1])
+    with table_col:
+        selected_table = st.selectbox("Table", tables, key="db_explorer_table")
+    with limit_col:
+        row_limit = st.number_input("Row limit", min_value=10, max_value=1000, value=100, step=50, key="db_explorer_limit")
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Row count
+                cur.execute(f"SELECT COUNT(*) FROM {selected_table}")  # noqa: S608
+                total_rows = cur.fetchone()[0]
+
+            df = pd.read_sql(
+                f"SELECT * FROM {selected_table} ORDER BY 1 DESC LIMIT %s",  # noqa: S608
+                conn,
+                params=(row_limit,),
+            )
+    except Exception as e:
+        st.error(f"Query error: {e}")
+        return
+
+    st.caption(f"**{selected_table}** — {total_rows} total rows (showing latest {min(row_limit, total_rows)})")
+    st.dataframe(df, use_container_width=True, height=400)
+
+    # ── Quick actions for staged_pos ──────────────────────────────────────
+    if selected_table == "staged_pos" and total_rows > 0:
+        st.markdown("**Quick Actions**")
+        act_col1, act_col2 = st.columns(2)
+
+        with act_col1:
+            if st.button("Delete ALL unprocessed records", type="secondary"):
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM staged_pos WHERE status = 'unprocessed'")
+                        deleted = cur.rowcount
+                    conn.commit()
+                st.success(f"Deleted {deleted} unprocessed records.")
+                st.rerun()
+
+        with act_col2:
+            if st.button("Delete ALL records", type="secondary"):
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM staged_pos")
+                        deleted = cur.rowcount
+                    conn.commit()
+                st.success(f"Deleted {deleted} records.")
+                st.rerun()
