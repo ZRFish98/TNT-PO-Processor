@@ -49,12 +49,12 @@ def load_settings():
 
 settings = load_settings()
 
-# ── Auto-generate credentials.json from env vars if not present ───────────────
+# ── Auto-generate credentials.json from env vars ─────────────────────────────
 _gmail_client_id = os.getenv("GMAIL_CLIENT_ID")
 _gmail_client_secret = os.getenv("GMAIL_CLIENT_SECRET")
 _gmail_creds_path = os.getenv("GMAIL_CREDENTIALS_PATH", "/data/gmail/credentials.json")
 
-if _gmail_client_id and _gmail_client_secret and not os.path.exists(_gmail_creds_path):
+if _gmail_client_id and _gmail_client_secret:
     _base_url = os.getenv("APP_BASE_URL", "http://localhost:8501")
     _creds_data = {
         "web": {
@@ -66,9 +66,23 @@ if _gmail_client_id and _gmail_client_secret and not os.path.exists(_gmail_creds
             "redirect_uris": [_base_url.rstrip("/") + "/"],
         }
     }
-    os.makedirs(os.path.dirname(_gmail_creds_path), exist_ok=True)
-    with open(_gmail_creds_path, "w") as _f:
-        _json_mod.dump(_creds_data, _f)
+    # Always write so credential updates via env vars take effect immediately
+    _new_json = _json_mod.dumps(_creds_data, sort_keys=True)
+    _needs_write = True
+    if os.path.exists(_gmail_creds_path):
+        try:
+            with open(_gmail_creds_path) as _f:
+                _needs_write = _json_mod.dumps(_json_mod.load(_f), sort_keys=True) != _new_json
+        except Exception:
+            _needs_write = True
+    if _needs_write:
+        os.makedirs(os.path.dirname(_gmail_creds_path), exist_ok=True)
+        with open(_gmail_creds_path, "w") as _f:
+            _f.write(_new_json)
+        # Invalidate any stale token from a previous client ID
+        _token_path = os.getenv("GMAIL_TOKEN_PATH", "/data/gmail/token.json")
+        if os.path.exists(_token_path):
+            os.remove(_token_path)
 
 # ── Gmail Monitor singleton ────────────────────────────────────────────────────
 @st.cache_resource
