@@ -1,6 +1,8 @@
 """
 Dashboard / Queue page — shows staged POs from PostgreSQL with multi-select,
 manual PDF upload, and "Process Selected" button.
+
+POs are split by region (East/West) so the user processes one region at a time.
 """
 import json
 
@@ -15,8 +17,8 @@ def _load_queue() -> pd.DataFrame:
     """Fetch all staged_pos records ordered by created_at desc."""
     sql = """
         SELECT id, source, original_filename, po_number, store_id, store_name,
-               order_date, delivery_date, status, error_message,
-               created_at, processed_at
+               order_date, delivery_date, region, status, error_message,
+               gmail_from, gmail_received_at, created_at, processed_at
         FROM staged_pos
         ORDER BY created_at DESC
         LIMIT 200
@@ -60,8 +62,24 @@ def _fetch_extracted_data(ids: list) -> pd.DataFrame:
     return df
 
 
-def _insert_manual_po(filename: str, extracted_data: list, errors: list):
-    """Insert a manually uploaded PO into staged_pos."""
+def _detect_region(extracted_data: list, cw_stores: set) -> str | None:
+    """Determine 'east' or 'west' from the first PO's store ID."""
+    if not extracted_data:
+        return None
+    first_store = extracted_data[0].get("Store ID")
+    if first_store is None:
+        return None
+    try:
+        store_id = int(first_store)
+    except (ValueError, TypeError):
+        return None
+    return "west" if store_id in cw_stores else "east"
+
+
+def _insert_manual_po(
+    filename: str, extracted_data: list, errors: list, cw_stores: set,
+) -> int:
+    """Insert a manually uploaded PO into staged_pos with auto-detected region."""
     po_number = store_id = store_name = order_date = delivery_date = None
     if extracted_data:
         first = extracted_data[0]
@@ -71,21 +89,22 @@ def _insert_manual_po(filename: str, extracted_data: list, errors: list):
         order_date = first.get("Order Date", "") or None
         delivery_date = first.get("Delivery Date", "") or None
 
+    region = _detect_region(extracted_data, cw_stores)
     status = "unprocessed" if extracted_data else "error"
     error_msg = "; ".join(errors) if errors and not extracted_data else None
 
     sql = """
         INSERT INTO staged_pos (
             source, original_filename, po_number, store_id, store_name,
-            order_date, delivery_date, extracted_data, status, error_message
-        ) VALUES ('manual', %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+            order_date, delivery_date, region, extracted_data, status, error_message
+        ) VALUES ('manual', %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
         RETURNING id
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (
                 filename, po_number, store_id, store_name,
-                order_date, delivery_date,
+                order_date, delivery_date, region,
                 json.dumps(extracted_data), status, error_msg,
             ))
             new_id = cur.fetchone()[0]
@@ -102,19 +121,28 @@ _STATUS_COLORS = {
 }
 
 
-def render():
-    st.title("📋 PO Queue")
+def render(settings: dict):
+    st.title("PO Queue")
+
+    cw_stores = set(settings.get("warehouse_mapping", {}).get("cw_stores", []))
 
     # Check DB connectivity
     if not test_connection():
         st.error(
-            "⚠️ Cannot connect to PostgreSQL. "
+            "Cannot connect to PostgreSQL. "
             "Ensure the database service is running and DATABASE_URL is set."
         )
         return
 
-    # Auto-refresh toggle
-    refresh_col, info_col = st.columns([1, 3])
+    # ── Region filter ─────────────────────────────────────────────────────────
+    region_col, refresh_col, info_col = st.columns([2, 1, 3])
+    with region_col:
+        region_filter = st.radio(
+            "Region",
+            ["All", "East (CE)", "West (CW)"],
+            horizontal=True,
+            key="region_filter",
+        )
     with refresh_col:
         auto_refresh = st.toggle("Auto-refresh (30s)", value=False, key="queue_auto_refresh")
     with info_col:
@@ -130,12 +158,19 @@ def render():
     # ── Queue table ────────────────────────────────────────────────────────────
     queue_df = _load_queue()
 
+    # Apply region filter
+    if region_filter == "East (CE)" and "region" in queue_df.columns:
+        queue_df = queue_df[queue_df["region"] == "east"]
+    elif region_filter == "West (CW)" and "region" in queue_df.columns:
+        queue_df = queue_df[queue_df["region"] == "west"]
+
     if queue_df.empty:
-        st.info("📭 No POs in queue yet. Upload a PDF below or wait for Gmail monitor to pick one up.")
+        st.info("No POs in queue for this region. Upload a PDF below or wait for Gmail monitor.")
     else:
         st.subheader(f"Queue ({len(queue_df)} items)")
 
         # Add a checkbox column for selection
+        queue_df = queue_df.copy()
         queue_df.insert(0, "Select", False)
 
         # Status badge column
@@ -146,10 +181,19 @@ def render():
             else f"🔴 {s}"))
         )
 
+        # Region display column
+        if "region" in queue_df.columns:
+            queue_df["Region"] = queue_df["region"].map(
+                {"east": "CE (East)", "west": "CW (West)"}
+            ).fillna("—")
+        else:
+            queue_df["Region"] = "—"
+
         display_cols = [
             "Select", "id", "source", "original_filename",
-            "store_id", "store_name", "po_number",
-            "order_date", "delivery_date", "Status", "created_at",
+            "store_id", "store_name", "po_number", "Region",
+            "order_date", "delivery_date", "Status",
+            "gmail_received_at", "created_at",
         ]
         display_df = queue_df[[c for c in display_cols if c in queue_df.columns]].copy()
 
@@ -166,7 +210,9 @@ def render():
                 "store_id": st.column_config.NumberColumn("Store", width="small"),
                 "store_name": st.column_config.TextColumn("Store Name"),
                 "po_number": st.column_config.TextColumn("PO #"),
+                "Region": st.column_config.TextColumn("Region", width="small"),
                 "Status": st.column_config.TextColumn("Status"),
+                "gmail_received_at": st.column_config.TextColumn("Received (Toronto)"),
             },
             disabled=[c for c in display_df.columns if c != "Select"],
             hide_index=True,
@@ -192,7 +238,7 @@ def render():
         with btn_col:
             process_disabled = len(valid_ids) == 0
             if st.button(
-                f"⚡ Process Selected ({len(valid_ids)})",
+                f"Process Selected ({len(valid_ids)})",
                 type="primary",
                 disabled=process_disabled,
             ):
@@ -223,7 +269,7 @@ def render():
             st.caption(summary)
 
         # Clear processed button
-        if st.button("🗑️ Clear Processed (older than 7 days)"):
+        if st.button("Clear Processed (older than 7 days)"):
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -237,7 +283,7 @@ def render():
     st.divider()
 
     # ── Manual PDF Upload ──────────────────────────────────────────────────────
-    st.subheader("📂 Manual PDF Upload")
+    st.subheader("Manual PDF Upload")
     st.caption("Upload PDFs directly — they will appear in the queue above and be auto-selected for processing.")
 
     uploaded_files = st.file_uploader(
@@ -254,11 +300,11 @@ def render():
             with st.spinner("Extracting PDF data..."):
                 for f in uploaded_files:
                     data, errors = PDFExtractor.extract_from_file(f, f.name)
-                    new_id = _insert_manual_po(f.name, data, errors)
+                    new_id = _insert_manual_po(f.name, data, errors, cw_stores)
                     new_ids.append(new_id)
                     all_errors.extend(errors)
 
-            st.success(f"✅ Added {len(new_ids)} PDF(s) to queue.")
+            st.success(f"Added {len(new_ids)} PDF(s) to queue.")
 
             if all_errors:
                 with st.expander("Extraction warnings"):

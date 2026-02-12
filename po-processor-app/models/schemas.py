@@ -73,6 +73,7 @@ class StagedPO(BaseModel):
     source: str = "manual"          # 'gmail' | 'manual'
     gmail_message_id: Optional[str] = None
     gmail_subject: Optional[str] = None
+    gmail_from: Optional[str] = None
     gmail_received_at: Optional[str] = None
     original_filename: str
     po_number: Optional[str] = None
@@ -80,6 +81,7 @@ class StagedPO(BaseModel):
     store_name: Optional[str] = None
     order_date: Optional[str] = None
     delivery_date: Optional[str] = None
+    region: Optional[str] = None    # 'east' | 'west'
     extracted_data: List[Dict] = []
     status: str = "unprocessed"     # unprocessed | processing | processed | error
     error_message: Optional[str] = None

@@ -43,14 +43,17 @@ services:
       - traefik.http.middlewares.po-processor.headers.STSPreload=true
       - traefik.http.routers.po-processor.middlewares=po-processor@docker
     environment:
-      - ODOO_URL=https://evpf.odoo.com
-      - ODOO_DB=evpf
-      - ODOO_USERNAME=${ODOO_USERNAME}
+      - ODOO_URL=https://atiara-trading-inc.odoo.com
+      - ODOO_DB=atiara-trading-inc
+      - ODOO_USERNAME=official@atiara.ca
       - ODOO_API_KEY=${ODOO_API_KEY}
       - DATABASE_URL=postgresql://po_user:${POSTGRES_PASSWORD}@po-processor-db:5432/po_processor
+      - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID}
+      - GMAIL_CLIENT_SECRET=${GMAIL_CLIENT_SECRET}
       - GMAIL_TOKEN_PATH=/data/gmail/token.json
       - GMAIL_CREDENTIALS_PATH=/data/gmail/credentials.json
       - GMAIL_POLL_INTERVAL_SECONDS=300
+      - APP_BASE_URL=https://internal.atiara.cloud
     volumes:
       - gmail_tokens:/data/gmail
     healthcheck:

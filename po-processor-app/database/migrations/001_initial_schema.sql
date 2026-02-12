@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS staged_pos (
     source              VARCHAR(20) NOT NULL DEFAULT 'manual',
     gmail_message_id    TEXT,
     gmail_subject       TEXT,
+    gmail_from          TEXT,
     gmail_received_at   TIMESTAMPTZ,
     original_filename   TEXT NOT NULL,
 
@@ -17,6 +18,9 @@ CREATE TABLE IF NOT EXISTS staged_pos (
     store_name          TEXT,
     order_date          TEXT,
     delivery_date       TEXT,
+
+    -- Region: 'east' (CE) or 'west' (CW) — determined from first PO's store ID
+    region              VARCHAR(10),
 
     -- Full extracted payload as JSON array of row dicts
     extracted_data      JSONB NOT NULL DEFAULT '[]',
@@ -39,6 +43,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_staged_pos_gmail_msg_id
 -- Fast queue page queries
 CREATE INDEX IF NOT EXISTS idx_staged_pos_status
     ON staged_pos(status, created_at DESC);
+
+-- Filter by region
+CREATE INDEX IF NOT EXISTS idx_staged_pos_region
+    ON staged_pos(region);
 
 -- App settings (persisted across restarts)
 CREATE TABLE IF NOT EXISTS app_settings (

@@ -2,6 +2,13 @@
 Gmail Monitor — background daemon thread that polls Gmail for T&T PO PDF attachments
 and stores extracted data in PostgreSQL.
 
+Key behaviours:
+- Only fetches UNREAD emails from tntpo@tntsupermarket.com
+- Marks emails as read after processing (requires gmail.modify scope)
+- Detects region (east/west) from first PO's store ID
+- Stores received time in Toronto (America/Toronto) timezone
+- Stores email From header for tracking
+
 OAuth flow works inside Docker by using Streamlit's query_params to handle the
 Google redirect URI callback (see frontend/app.py for the callback handler).
 """
@@ -11,11 +18,12 @@ import logging
 import os
 import threading
 import time
-from contextlib import contextmanager
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -27,10 +35,37 @@ from backend.pdf_extractor import PDFExtractor
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+# gmail.modify is required to mark messages as read after processing
+SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
-# Gmail search query — tune to match actual T&T PO email patterns
-GMAIL_SEARCH_QUERY = 'has:attachment filename:pdf subject:"Purchase Order"'
+# Only fetch unread emails with PDF attachments from the T&T PO sender
+GMAIL_SEARCH_QUERY = 'from:tntpo@tntsupermarket.com is:unread has:attachment filename:pdf'
+
+TORONTO_TZ = ZoneInfo("America/Toronto")
+
+
+def _parse_email_date(date_str: str) -> Optional[str]:
+    """Parse RFC 2822 date string and return ISO format in Toronto timezone."""
+    try:
+        dt = parsedate_to_datetime(date_str)
+        dt_toronto = dt.astimezone(TORONTO_TZ)
+        return dt_toronto.isoformat()
+    except Exception:
+        return date_str or None
+
+
+def _detect_region(extracted_data: List[Dict], cw_stores: Set[int]) -> Optional[str]:
+    """Determine 'east' or 'west' from the first PO's store ID."""
+    if not extracted_data:
+        return None
+    first_store = extracted_data[0].get('Store ID')
+    if first_store is None:
+        return None
+    try:
+        store_id = int(first_store)
+    except (ValueError, TypeError):
+        return None
+    return 'west' if store_id in cw_stores else 'east'
 
 
 class GmailMonitor:
@@ -45,11 +80,13 @@ class GmailMonitor:
     def __init__(
         self,
         db_conn_factory: Callable,
+        cw_stores: Set[int],
         poll_interval_seconds: int = 300,
         token_path: str = '/data/gmail/token.json',
         credentials_path: str = '/data/gmail/credentials.json',
     ):
         self.db_conn_factory = db_conn_factory
+        self.cw_stores = cw_stores
         self.poll_interval = poll_interval_seconds
         self.token_path = Path(token_path)
         self.credentials_path = Path(credentials_path)
@@ -176,7 +213,9 @@ class GmailMonitor:
                     self._check_new_emails(creds)
                     with self._status_lock:
                         self._status['authenticated'] = True
-                        self._status['last_poll_at'] = datetime.now(timezone.utc).isoformat()
+                        self._status['last_poll_at'] = (
+                            datetime.now(TORONTO_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+                        )
                         self._status['last_error'] = None
                 else:
                     with self._status_lock:
@@ -205,7 +244,7 @@ class GmailMonitor:
             return None
 
     def _check_new_emails(self, creds: Credentials):
-        """Search Gmail for PDF attachments and process new ones."""
+        """Search Gmail for unread PDF emails from T&T and process new ones."""
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
 
         try:
@@ -219,11 +258,13 @@ class GmailMonitor:
             return
 
         messages = results.get('messages', [])
-        logger.info(f"Gmail search returned {len(messages)} messages")
+        logger.info(f"Gmail search returned {len(messages)} unread messages")
 
         for msg_meta in messages:
             msg_id = msg_meta['id']
             if self._is_duplicate(msg_id):
+                # Already in DB — just mark as read in case it was missed
+                self._mark_as_read(service, msg_id)
                 continue
 
             try:
@@ -233,15 +274,33 @@ class GmailMonitor:
                     format='full',
                 ).execute()
                 self._process_message(service, msg)
+                # Mark as read after successful processing
+                self._mark_as_read(service, msg_id)
             except Exception as e:
                 logger.error(f"Error processing message {msg_id}: {e}")
 
+    def _mark_as_read(self, service, msg_id: str):
+        """Remove the UNREAD label from a Gmail message."""
+        try:
+            service.users().messages().modify(
+                userId='me',
+                id=msg_id,
+                body={'removeLabelIds': ['UNREAD']},
+            ).execute()
+            logger.debug(f"Marked message {msg_id} as read")
+        except HttpError as e:
+            logger.warning(f"Failed to mark message {msg_id} as read: {e}")
+
     def _process_message(self, service, msg: dict):
-        """Extract all PDF attachments from a Gmail message and store them."""
+        """Extract the PDF attachment from a Gmail message and store it."""
         msg_id = msg['id']
         headers = {h['name']: h['value'] for h in msg.get('payload', {}).get('headers', [])}
         subject = headers.get('Subject', '')
         date_str = headers.get('Date', '')
+        from_header = headers.get('From', '')
+
+        # Convert received time to Toronto timezone
+        received_at = _parse_email_date(date_str)
 
         parts = msg.get('payload', {}).get('parts', [])
 
@@ -281,9 +340,10 @@ class GmailMonitor:
             except Exception as e:
                 logger.error(f"Failed to download attachment {filename} from {msg_id}: {e}")
                 self._save_to_db(
-                    gmail_message_id=f"{msg_id}_{filename}",
+                    gmail_message_id=msg_id,
                     gmail_subject=subject,
-                    gmail_received_at=date_str,
+                    gmail_from=from_header,
+                    gmail_received_at=received_at,
                     filename=filename or 'attachment.pdf',
                     extracted_data=[],
                     errors=[f"Download failed: {e}"],
@@ -293,17 +353,18 @@ class GmailMonitor:
             pdf_io = BytesIO(pdf_bytes)
             extracted_data, errors = PDFExtractor.extract_from_file(pdf_io, filename)
 
-            # Use msg_id + filename as dedup key when one email has multiple PDFs
-            dedup_key = f"{msg_id}_{filename}" if filename else msg_id
-
             self._save_to_db(
-                gmail_message_id=dedup_key,
+                gmail_message_id=msg_id,
                 gmail_subject=subject,
-                gmail_received_at=date_str,
+                gmail_from=from_header,
+                gmail_received_at=received_at,
                 filename=filename or 'attachment.pdf',
                 extracted_data=extracted_data,
                 errors=errors,
             )
+
+            # Each email has only one PDF — break after first
+            break
 
         if not pdf_found:
             logger.debug(f"Message {msg_id} matched query but contained no PDF attachments")
@@ -312,7 +373,8 @@ class GmailMonitor:
         self,
         gmail_message_id: str,
         gmail_subject: str,
-        gmail_received_at: str,
+        gmail_from: str,
+        gmail_received_at: Optional[str],
         filename: str,
         extracted_data: list,
         errors: list,
@@ -328,18 +390,25 @@ class GmailMonitor:
             order_date = first.get('Order Date', '') or None
             delivery_date = first.get('Delivery Date', '') or None
 
+        # Detect region from first PO's store ID
+        region = _detect_region(extracted_data, self.cw_stores)
+
         status = 'unprocessed' if extracted_data else 'error'
         error_message = '; '.join(errors) if errors and not extracted_data else None
 
         sql = """
             INSERT INTO staged_pos (
-                source, gmail_message_id, gmail_subject, gmail_received_at,
-                original_filename, po_number, store_id, store_name,
-                order_date, delivery_date, extracted_data, status, error_message
+                source, gmail_message_id, gmail_subject, gmail_from,
+                gmail_received_at, original_filename,
+                po_number, store_id, store_name,
+                order_date, delivery_date, region,
+                extracted_data, status, error_message
             ) VALUES (
                 'gmail', %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s::jsonb, %s, %s
+                %s, %s,
+                %s, %s, %s,
+                %s, %s, %s,
+                %s::jsonb, %s, %s
             )
             ON CONFLICT (gmail_message_id) DO NOTHING
         """
@@ -348,9 +417,10 @@ class GmailMonitor:
             with self.db_conn_factory() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, (
-                        gmail_message_id, gmail_subject, gmail_received_at,
-                        filename, po_number, store_id, store_name,
-                        order_date, delivery_date,
+                        gmail_message_id, gmail_subject, gmail_from,
+                        gmail_received_at, filename,
+                        po_number, store_id, store_name,
+                        order_date, delivery_date, region,
                         json.dumps(extracted_data),
                         status, error_message,
                     ))
@@ -359,18 +429,20 @@ class GmailMonitor:
             with self._status_lock:
                 self._status['emails_processed'] += 1
 
-            logger.info(f"Saved staged PO: {filename} (status={status})")
+            logger.info(
+                f"Saved staged PO: {filename} (status={status}, region={region})"
+            )
 
         except Exception as e:
             logger.error(f"DB write failed for {filename}: {e}")
 
     def _is_duplicate(self, gmail_message_id: str) -> bool:
         """Check if this Gmail message ID already exists in staged_pos."""
-        sql = "SELECT 1 FROM staged_pos WHERE gmail_message_id LIKE %s LIMIT 1"
+        sql = "SELECT 1 FROM staged_pos WHERE gmail_message_id = %s LIMIT 1"
         try:
             with self.db_conn_factory() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(sql, (f"{gmail_message_id}%",))
+                    cur.execute(sql, (gmail_message_id,))
                     return cur.fetchone() is not None
         except Exception as e:
             logger.error(f"Dedup check failed for {gmail_message_id}: {e}")

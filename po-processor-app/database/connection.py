@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS staged_pos (
     source              VARCHAR(20) NOT NULL DEFAULT 'manual',
     gmail_message_id    TEXT,
     gmail_subject       TEXT,
+    gmail_from          TEXT,
     gmail_received_at   TIMESTAMPTZ,
     original_filename   TEXT NOT NULL,
     po_number           TEXT,
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS staged_pos (
     store_name          TEXT,
     order_date          TEXT,
     delivery_date       TEXT,
+    region              VARCHAR(10),
     extracted_data      JSONB NOT NULL DEFAULT '[]',
     status              VARCHAR(20) NOT NULL DEFAULT 'unprocessed',
     error_message       TEXT,
@@ -36,6 +38,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_staged_pos_gmail_msg_id
     ON staged_pos(gmail_message_id) WHERE gmail_message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_staged_pos_status
     ON staged_pos(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_staged_pos_region
+    ON staged_pos(region);
 CREATE TABLE IF NOT EXISTS app_settings (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
@@ -46,15 +50,23 @@ INSERT INTO app_settings (key, value) VALUES
 ON CONFLICT (key) DO NOTHING;
 """
 
+# Idempotent migration for existing databases that lack new columns
+_MIGRATE_SQL = """
+ALTER TABLE staged_pos ADD COLUMN IF NOT EXISTS gmail_from TEXT;
+ALTER TABLE staged_pos ADD COLUMN IF NOT EXISTS region VARCHAR(10);
+CREATE INDEX IF NOT EXISTS idx_staged_pos_region ON staged_pos(region);
+"""
+
 
 def _ensure_schema(conn):
-    """Create tables if they don't exist yet."""
+    """Create tables if they don't exist yet, and run migrations for new columns."""
     global _schema_initialized
     if _schema_initialized:
         return
     try:
         with conn.cursor() as cur:
             cur.execute(_INIT_SQL)
+            cur.execute(_MIGRATE_SQL)
         conn.commit()
         _schema_initialized = True
         logger.info("Database schema initialized")

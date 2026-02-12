@@ -1,3 +1,4 @@
+import json as _json_mod
 import os
 import sys
 from datetime import datetime
@@ -48,11 +49,34 @@ def load_settings():
 
 settings = load_settings()
 
+# ── Auto-generate credentials.json from env vars if not present ───────────────
+_gmail_client_id = os.getenv("GMAIL_CLIENT_ID")
+_gmail_client_secret = os.getenv("GMAIL_CLIENT_SECRET")
+_gmail_creds_path = os.getenv("GMAIL_CREDENTIALS_PATH", "/data/gmail/credentials.json")
+
+if _gmail_client_id and _gmail_client_secret and not os.path.exists(_gmail_creds_path):
+    _base_url = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    _creds_data = {
+        "web": {
+            "client_id": _gmail_client_id,
+            "client_secret": _gmail_client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris": [_base_url.rstrip("/") + "/"],
+        }
+    }
+    os.makedirs(os.path.dirname(_gmail_creds_path), exist_ok=True)
+    with open(_gmail_creds_path, "w") as _f:
+        _json_mod.dump(_creds_data, _f)
+
 # ── Gmail Monitor singleton ────────────────────────────────────────────────────
 @st.cache_resource
 def get_gmail_monitor() -> GmailMonitor:
+    _cw = set(settings.get("warehouse_mapping", {}).get("cw_stores", []))
     monitor = GmailMonitor(
         db_conn_factory=get_db_connection,
+        cw_stores=_cw,
         poll_interval_seconds=int(os.getenv("GMAIL_POLL_INTERVAL_SECONDS", 300)),
         token_path=os.getenv("GMAIL_TOKEN_PATH", "/data/gmail/token.json"),
         credentials_path=os.getenv("GMAIL_CREDENTIALS_PATH", "/data/gmail/credentials.json"),
@@ -225,7 +249,7 @@ if page == "Settings":
 
 elif page == "Dashboard":
     from frontend.pages.p2_queue import render
-    render()
+    render(settings)
 
 elif page == "Transform & Review":
     from frontend.pages.p3_transform import render
