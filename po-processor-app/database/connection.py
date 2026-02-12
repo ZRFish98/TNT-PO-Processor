@@ -10,6 +10,58 @@ logger = logging.getLogger(__name__)
 
 # Thread-safe connection pool — shared across Streamlit sessions and the Gmail monitor thread
 _pool: psycopg2.pool.ThreadedConnectionPool = None
+_schema_initialized = False
+
+_INIT_SQL = """
+CREATE TABLE IF NOT EXISTS staged_pos (
+    id                  SERIAL PRIMARY KEY,
+    source              VARCHAR(20) NOT NULL DEFAULT 'manual',
+    gmail_message_id    TEXT,
+    gmail_subject       TEXT,
+    gmail_received_at   TIMESTAMPTZ,
+    original_filename   TEXT NOT NULL,
+    po_number           TEXT,
+    store_id            INTEGER,
+    store_name          TEXT,
+    order_date          TEXT,
+    delivery_date       TEXT,
+    extracted_data      JSONB NOT NULL DEFAULT '[]',
+    status              VARCHAR(20) NOT NULL DEFAULT 'unprocessed',
+    error_message       TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at        TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_staged_pos_gmail_msg_id
+    ON staged_pos(gmail_message_id) WHERE gmail_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_staged_pos_status
+    ON staged_pos(status, created_at DESC);
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO app_settings (key, value) VALUES
+    ('gmail_poll_interval_seconds', '300')
+ON CONFLICT (key) DO NOTHING;
+"""
+
+
+def _ensure_schema(conn):
+    """Create tables if they don't exist yet."""
+    global _schema_initialized
+    if _schema_initialized:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_INIT_SQL)
+        conn.commit()
+        _schema_initialized = True
+        logger.info("Database schema initialized")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Schema initialization failed: {e}")
+        raise
 
 
 def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
@@ -28,6 +80,12 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
             dsn=database_url,
         )
         logger.info("PostgreSQL connection pool created")
+        # Auto-initialize schema on first pool creation
+        conn = _pool.getconn()
+        try:
+            _ensure_schema(conn)
+        finally:
+            _pool.putconn(conn)
     return _pool
 
 
