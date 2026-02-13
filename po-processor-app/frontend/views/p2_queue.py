@@ -167,11 +167,15 @@ def render(settings: dict):
     if queue_df.empty:
         st.info("No POs in queue for this region. Upload a PDF below or wait for Gmail monitor.")
     else:
-        st.subheader(f"Queue ({len(queue_df)} items)")
+        header_col, select_col = st.columns([3, 1])
+        with header_col:
+            st.subheader(f"Queue ({len(queue_df)} items)")
+        with select_col:
+            select_all = st.checkbox("Select All", key="queue_select_all")
 
         # Add a checkbox column for selection
         queue_df = queue_df.copy()
-        queue_df.insert(0, "Select", False)
+        queue_df.insert(0, "Select", select_all)
 
         # Status badge column
         queue_df["Status"] = queue_df["status"].apply(
@@ -189,11 +193,19 @@ def render(settings: dict):
         else:
             queue_df["Region"] = "—"
 
+        # Format received time: gmail_received_at for emails, created_at as fallback
+        received_ts = pd.to_datetime(
+            queue_df.get("gmail_received_at"), errors="coerce"
+        )
+        fallback_ts = pd.to_datetime(
+            queue_df.get("created_at"), errors="coerce"
+        )
+        queue_df["Received"] = received_ts.fillna(fallback_ts).dt.strftime("%Y-%m-%d %H:%M").fillna("—")
+
         display_cols = [
-            "Select", "id", "source", "original_filename",
-            "store_id", "store_name", "po_number", "Region",
+            "Select", "id", "Received", "source", "original_filename",
+            "store_id", "Region",
             "order_date", "delivery_date", "Status",
-            "gmail_received_at", "created_at",
         ]
         display_df = queue_df[[c for c in display_cols if c in queue_df.columns]].copy()
 
@@ -205,14 +217,12 @@ def render(settings: dict):
             column_config={
                 "Select": st.column_config.CheckboxColumn("Select", width="small"),
                 "id": st.column_config.NumberColumn("ID", width="small"),
+                "Received": st.column_config.TextColumn("Received", width="medium"),
                 "source": st.column_config.TextColumn("Source", width="small"),
                 "original_filename": st.column_config.TextColumn("Filename"),
                 "store_id": st.column_config.NumberColumn("Store", width="small"),
-                "store_name": st.column_config.TextColumn("Store Name"),
-                "po_number": st.column_config.TextColumn("PO #"),
                 "Region": st.column_config.TextColumn("Region", width="small"),
                 "Status": st.column_config.TextColumn("Status"),
-                "gmail_received_at": st.column_config.TextColumn("Received (Toronto)"),
             },
             disabled=[c for c in display_df.columns if c != "Select"],
             hide_index=True,
@@ -256,7 +266,9 @@ def render(settings: dict):
                     st.session_state["order_summaries"] = __import__("pandas").DataFrame()
                     st.session_state["line_details"] = __import__("pandas").DataFrame()
                     st.session_state["odoo_products_cache"] = None
-                    st.session_state["config_latest_so"] = None
+                    # Clear export state (managed locally in p5_export)
+                    for _k in ("export_latest_so", "export_so_fetched", "export_open_orders"):
+                        st.session_state.pop(_k, None)
                     st.session_state["current_page"] = "Transform & Review"
                     st.rerun()
 

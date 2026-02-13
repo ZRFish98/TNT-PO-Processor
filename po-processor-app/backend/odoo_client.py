@@ -137,12 +137,12 @@ class OdooClient:
             raise ConnectionError("Not connected to Odoo")
 
         try:
-            # First, simple create
             vals = {
                 'order_id': order_id,
                 'product_id': product_id,
                 'product_uom_qty': qty,
-                'price_unit': price_unit
+                'price_unit': price_unit,
+                'x_studio_price_lock': True,
             }
 
             line_id = self.models.execute_kw(
@@ -158,19 +158,28 @@ class OdooClient:
             raise e
 
     def get_partner_id_by_name(self, name: str) -> Optional[int]:
-        """Find partner ID by name"""
+        """Find partner ID by name or display_name.
+
+        Odoo child contacts have a short ``name`` (e.g. 'Woodbine Store - 021')
+        and a computed ``display_name`` that includes the parent company
+        (e.g. 'T&T Supermarket Inc., Woodbine Store - 021').  We try
+        ``display_name`` first (settings.yaml uses that format), then fall back
+        to ``name``.
+        """
         if not self.connected:
             raise ConnectionError("Not connected to Odoo")
 
-        domain = [['name', '=', name]]
-        partners = self.models.execute_kw(
-            self.db, self.uid, self.api_key,
-            'res.partner', 'search_read',
-            [domain],
-            {'fields': ['id'], 'limit': 1}
-        )
+        for field in ('display_name', 'name'):
+            partners = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'res.partner', 'search_read',
+                [[[field, '=', name]]],
+                {'fields': ['id'], 'limit': 1}
+            )
+            if partners:
+                return partners[0]['id']
 
-        return partners[0]['id'] if partners else None
+        return None
 
     def get_latest_so_number(self) -> Optional[int]:
         """
@@ -227,7 +236,7 @@ class OdooClient:
 
             domain = [
                 ['partner_id', '=', partner_id],
-                ['delivery_status', '!=', 'delivered'],
+                ['delivery_status', '!=', 'full'],
                 ['x_studio_tester', '=', False],
             ]
 
@@ -256,6 +265,109 @@ class OdooClient:
         except Exception as e:
             logger.error(f"Error fetching open SOs for {partner_name}: {e}")
             return []
+
+    def get_open_orders_for_stores(self, partner_names: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch the latest undelivered, non-tester SO for each partner name.
+
+        Returns {requested_name: {id, name, client_order_ref, ...}} mapping.
+        Uses the same filters as get_open_sales_orders (delivery_status != 'delivered').
+        Looks up partners individually to handle minor name mismatches.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        result: Dict[str, Dict[str, Any]] = {}
+
+        # Collect all partner IDs, mapping back to the requested name
+        partner_id_to_requested: Dict[int, str] = {}
+        for name in partner_names:
+            pid = self.get_partner_id_by_name(name)
+            if pid:
+                partner_id_to_requested[pid] = name
+            else:
+                logger.debug(f"Partner not found in Odoo: {name}")
+
+        if not partner_id_to_requested:
+            logger.warning(f"No partners found in Odoo for any of {len(partner_names)} names")
+            return {}
+
+        try:
+            partner_ids = list(partner_id_to_requested.keys())
+
+            domain = [
+                ['partner_id', 'in', partner_ids],
+                ['delivery_status', '!=', 'full'],
+                ['x_studio_tester', '=', False],
+            ]
+            fields = [
+                'name', 'partner_id', 'state', 'delivery_status',
+                'client_order_ref', 'x_studio_delivery_date', 'create_date',
+            ]
+            orders = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'sale.order', 'search_read',
+                [domain],
+                {'fields': fields, 'order': 'create_date desc', 'limit': 500}
+            )
+
+            # Group by requested partner name, keep only the latest per partner
+            for order in orders:
+                pid = order['partner_id'][0] if isinstance(order['partner_id'], (list, tuple)) else order['partner_id']
+                requested_name = partner_id_to_requested.get(pid)
+                if requested_name and requested_name not in result:
+                    result[requested_name] = order
+
+            logger.info(f"Found open SOs for {len(result)} of {len(partner_names)} stores")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error fetching open orders for stores: {e}")
+            return {}
+
+    def get_all_undelivered_orders(self) -> List[Dict[str, Any]]:
+        """Fetch all undelivered, non-tester sales orders from Odoo."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            domain = [
+                ['delivery_status', '!=', 'full'],
+                ['x_studio_tester', '=', False],
+            ]
+            fields = [
+                'name', 'date_order', 'partner_id',
+                'warehouse_id', 'delivery_status',
+            ]
+            orders = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'sale.order', 'search_read',
+                [domain],
+                {'fields': fields, 'order': 'name desc', 'limit': 500}
+            )
+            logger.info(f"Fetched {len(orders)} undelivered orders")
+            return orders
+
+        except Exception as e:
+            logger.error(f"Error fetching undelivered orders: {e}")
+            return []
+
+    def update_client_order_ref(self, so_id: int, new_ref: str) -> bool:
+        """Update the client_order_ref field on an existing SO."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'sale.order', 'write',
+                [[so_id], {'client_order_ref': new_ref}]
+            )
+            logger.info(f"Updated client_order_ref on SO {so_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating client_order_ref on SO {so_id}: {e}")
+            return False
 
     def append_lines_to_order(
         self, so_id: int, lines: List[Dict[str, Any]]

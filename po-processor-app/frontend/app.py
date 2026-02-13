@@ -24,7 +24,7 @@ st.set_page_config(
     page_title="T&T PO Processor",
     page_icon="🛒",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
@@ -124,14 +124,7 @@ _DEFAULTS = {
     "order_summaries": pd.DataFrame(),
     "line_details": pd.DataFrame(),
     "transform_errors": [],
-    # SO reference
-    "config_latest_so": None,
-    "latest_so_auto_fetched": False,
-    # Export
-    "export_mode": "create_new",
-    "open_sales_orders": [],
-    "selected_so_id": None,
-    "append_result": None,
+    # Export (SO ref + open orders are managed locally in p5_export.py)
     # Navigation
     "current_page": "Dashboard",
 }
@@ -183,109 +176,90 @@ if "code" in _qp and os.path.exists(_gmail_creds_path):
         st.error(f"OAuth callback failed: {_e}")
         st.query_params.clear()
 
-# ── Global Odoo signal light (fixed, visible on every page) ───────────────────
+# ── Odoo signal light (fixed, top-right) ──────────────────────────────────────
 _connected = st.session_state["odoo_connected"]
-_clr = "#00FF88" if _connected else "#FF4444"
-_lbl = "CONNECTED" if _connected else "DISCONNECTED"
+_clr = "#22c55e" if _connected else "#ef4444"
+_dot_lbl = "Connected" if _connected else "Disconnected"
 st.markdown(
     f"""
-    <div style="position:fixed; top:60px; right:20px; z-index:9999;
+    <div style="position:fixed; top:14px; right:140px; z-index:9999;
                 display:flex; align-items:center; gap:6px;
-                background:rgba(0,0,0,0.55); padding:5px 12px;
-                border-radius:20px; backdrop-filter:blur(6px);
-                border:1px solid {_clr}33;">
-        <div style="width:10px; height:10px; border-radius:50%;
-                    background:{_clr}; box-shadow:0 0 8px {_clr};"></div>
-        <span style="font-size:0.68rem; color:{_clr};
-                     font-family:'JetBrains Mono',monospace;
-                     letter-spacing:1px;">{_lbl}</span>
+                background:#111111; padding:4px 10px;
+                border-radius:6px; border:1px solid #222222;">
+        <div style="width:8px; height:8px; border-radius:50%;
+                    background:{_clr};"></div>
+        <span style="font-size:0.7rem; color:#737373;
+                     font-family:'Poppins',sans-serif;
+                     font-weight:500;">{_dot_lbl}</span>
     </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Gear button (opens sidebar settings) ──────────────────────────────────────
+st.markdown(
+    """
+    <div class="gear-btn" onclick="
+        var btn = parent.document.querySelector('[data-testid=\\'collapsedControl\\']')
+               || parent.document.querySelector('[data-testid=\\'stSidebarCollapseButton\\']');
+        if (btn) btn.click();
+    " title="Settings">&#9881;</div>
     """,
     unsafe_allow_html=True,
 )
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown("""
-    <div style="display:flex; align-items:center; margin-bottom:1.5rem;">
-        <div style="background:linear-gradient(135deg,#00D1FF 0%,#007AFF 100%);
-                    padding:12px; border-radius:12px; margin-right:15px;
-                    box-shadow:0 0 20px rgba(0,209,255,0.4);">
-            <span style="font-size:24px;">🛒</span>
-        </div>
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:0.75rem;">
+        <div style="width:36px; height:36px; border-radius:50%;
+                    background:#FF367F; display:flex; align-items:center;
+                    justify-content:center; font-weight:700; font-size:14px;
+                    color:#fff; font-family:'Poppins',sans-serif;">AT</div>
         <div>
-            <h1 style="margin:0; padding:0; line-height:1;">T&T PO PROCESSOR</h1>
-            <p style="color:#666; font-size:0.9rem; margin:0;
-                      font-family:'JetBrains Mono',monospace;">
-                SUPPLY CHAIN AUTOMATION ENGINE v2.0
-            </p>
+            <h1 style="margin:0; line-height:1; font-size:1.2rem !important;
+                       font-family:'Poppins',sans-serif; font-weight:600;
+                       color:#ededed; -webkit-text-fill-color:#ededed;">
+                T&T PO Processor</h1>
+            <p style="color:#737373; font-size:0.68rem; margin:0;
+                      font-family:'Poppins',sans-serif; letter-spacing:2px;
+                      text-transform:uppercase;">
+                Atiara Trading Inc.</p>
         </div>
     </div>
 """, unsafe_allow_html=True)
 
-# ── Sidebar navigation ─────────────────────────────────────────────────────────
-st.sidebar.markdown("""
-    <div style="margin-bottom:2rem;">
-        <h3 style="margin:0; font-size:1.1rem; letter-spacing:2px;
-                   color:#00D1FF; font-family:'Outfit',sans-serif;">NAVIGATOR</h3>
-        <div style="height:2px; width:30px;
-                    background:linear-gradient(90deg,#00D1FF,#a100ff);
-                    margin-top:5px;"></div>
-    </div>
-""", unsafe_allow_html=True)
-
-PAGES = ["Settings", "Dashboard", "Transform & Review", "Inventory Optimization", "Export"]
+# ── Horizontal tab navigation ─────────────────────────────────────────────────
+PAGES = ["Dashboard", "Transform & Review", "Export"]
 
 if st.session_state["current_page"] not in PAGES:
     st.session_state["current_page"] = "Dashboard"
 
-page = st.sidebar.radio(
-    "Go to",
+page = st.radio(
+    "nav",
     PAGES,
     index=PAGES.index(st.session_state["current_page"]),
+    horizontal=True,
+    label_visibility="collapsed",
+    key="main_nav",
 )
 st.session_state["current_page"] = page
 
-# ── Wizard progress indicator ─────────────────────────────────────────────────
-_idx = PAGES.index(page)
-_cols = st.columns(len(PAGES))
-for _i, _p in enumerate(PAGES):
-    with _cols[_i]:
-        if _i < _idx:
-            st.markdown(
-                f'<div class="nav-indicator" style="background:rgba(0,255,163,0.1);'
-                f'border-color:#00FFA3;color:#00FFA3">✓ {_p}</div>',
-                unsafe_allow_html=True,
-            )
-        elif _i == _idx:
-            st.markdown(
-                f'<div class="nav-indicator nav-indicator-active">{_p}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f'<div class="nav-indicator" style="opacity:0.4;">{_p}</div>',
-                unsafe_allow_html=True,
-            )
-
 st.divider()
 
-# ── Route to page module ───────────────────────────────────────────────────────
-if page == "Settings":
-    from frontend.views.p1_settings import render
-    render(settings, get_gmail_monitor())
+# ── Sidebar: Settings panel ───────────────────────────────────────────────────
+with st.sidebar:
+    from frontend.views.p1_settings import render as render_settings
+    render_settings(settings, get_gmail_monitor())
 
-elif page == "Dashboard":
+# ── Route to page module ───────────────────────────────────────────────────────
+if page == "Dashboard":
     from frontend.views.p2_queue import render
     render(settings)
 
 elif page == "Transform & Review":
-    from frontend.views.p3_transform import render
-    render(settings)
-
-elif page == "Inventory Optimization":
     from frontend.views.p4_inventory import render
     render(settings)
 
 elif page == "Export":
     from frontend.views.p5_export import render
-    render()
+    render(settings)

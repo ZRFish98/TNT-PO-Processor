@@ -10,15 +10,11 @@ from database.connection import get_db_connection
 load_dotenv()
 
 
-def render(settings: dict, gmail_monitor):
-    st.title("⚙️ Settings")
+def render(settings: dict, gmail_monitor) -> None:
+    st.markdown("#### ⚙️ Settings")
 
     # ── Odoo Connection ────────────────────────────────────────────────────────
-    st.subheader("Odoo Connection")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
+    with st.expander("Odoo Connection", expanded=True):
         odoo_url = st.text_input("Odoo URL", key="config_odoo_url")
         odoo_db = st.text_input("Database", key="config_odoo_db")
         odoo_user = st.text_input("Username", key="config_odoo_user")
@@ -29,44 +25,43 @@ def render(settings: dict, gmail_monitor):
             key="config_odoo_key",
         )
 
-    with col2:
-        st.write("")
-        st.write("")
-        if st.button("🔌 Connect Odoo", type="primary"):
+        if st.button("Connect Odoo", type="primary", key="btn_connect_odoo"):
             from backend.odoo_client import OdooClient
             client = OdooClient(odoo_url, odoo_db, odoo_user, odoo_key)
             if client.connect():
                 st.session_state["odoo_client"] = client
                 st.session_state["odoo_connected"] = True
-                st.session_state["odoo_last_connected"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                st.success("✅ Connected to Odoo")
+                st.session_state["odoo_last_connected"] = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                st.success("Connected to Odoo")
                 st.rerun()
             else:
                 st.session_state["odoo_connected"] = False
-                st.error("❌ Connection failed. Check credentials.")
+                st.error("Connection failed. Check credentials.")
 
         if st.session_state["odoo_connected"]:
-            st.success(f"✅ Connected — last: {st.session_state.get('odoo_last_connected', 'unknown')}")
-
-            if st.button("🔄 Disconnect"):
+            st.success(
+                f"Connected — last: {st.session_state.get('odoo_last_connected', 'unknown')}"
+            )
+            if st.button("Disconnect", key="btn_disconnect_odoo"):
                 st.session_state["odoo_client"] = None
                 st.session_state["odoo_connected"] = False
                 st.rerun()
         else:
-            st.error("❌ Not connected")
-
-    st.divider()
+            st.caption("Not connected")
 
     # ── Gmail Integration ──────────────────────────────────────────────────────
-    st.subheader("Gmail Integration")
-    st.caption("The Gmail monitor automatically checks for T&T PO PDF attachments and adds them to the queue.")
+    with st.expander("Gmail Integration", expanded=False):
+        st.caption(
+            "Monitors Gmail for T&T PO PDF attachments and adds them to the queue."
+        )
 
-    # Step 1 — credentials.json upload
-    creds_col, status_col = st.columns([2, 1])
-
-    with creds_col:
+        # Credentials status
         if not gmail_monitor.credentials_file_exists():
-            st.warning("⚠️ credentials.json not found. Download it from Google Cloud Console (OAuth 2.0 Client ID → Desktop App) and upload below.")
+            st.warning(
+                "credentials.json not found. Upload from Google Cloud Console."
+            )
             uploaded = st.file_uploader(
                 "Upload credentials.json",
                 type=["json"],
@@ -74,156 +69,148 @@ def render(settings: dict, gmail_monitor):
             )
             if uploaded:
                 gmail_monitor.save_credentials_file(uploaded.read())
-                st.success("✅ credentials.json saved. You can now authorize Gmail.")
+                st.success("credentials.json saved.")
                 st.rerun()
         else:
-            st.success("✅ credentials.json present")
-
-            if st.button("🗑️ Remove credentials.json"):
+            st.success("credentials.json present")
+            if st.button("Remove credentials.json", key="btn_rm_creds"):
                 gmail_monitor.credentials_path.unlink(missing_ok=True)
                 st.rerun()
 
-    with status_col:
+        # Auth status
         if gmail_monitor.is_authenticated():
-            st.success("Gmail: Connected")
+            st.success("Gmail: Authorized")
         else:
-            st.error("Gmail: Not authorized")
+            st.caption("Gmail: Not authorized")
 
-    # Step 2 — OAuth flow
-    if gmail_monitor.credentials_file_exists() and not gmail_monitor.is_authenticated():
-        st.markdown("**Step 2:** Authorize access to your Gmail inbox.")
+        # OAuth flow
+        if (
+            gmail_monitor.credentials_file_exists()
+            and not gmail_monitor.is_authenticated()
+        ):
+            base_url = os.getenv("APP_BASE_URL", "http://localhost:8501")
+            redirect_uri = base_url.rstrip("/") + "/"
 
-        # Determine redirect URI based on environment
-        base_url = os.getenv("APP_BASE_URL", "http://localhost:8501")
-        redirect_uri = base_url.rstrip("/") + "/"
+            if st.button("Authorize Gmail", key="btn_auth_gmail"):
+                try:
+                    auth_url, flow = gmail_monitor.get_authorization_url(redirect_uri)
+                    st.session_state["gmail_oauth_flow"] = flow
+                    st.session_state["gmail_auth_url"] = auth_url
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed: {e}")
 
-        if st.button("🔑 Authorize Gmail"):
-            try:
-                auth_url, flow = gmail_monitor.get_authorization_url(redirect_uri)
-                st.session_state["gmail_oauth_flow"] = flow
-                st.session_state["gmail_auth_url"] = auth_url
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to generate auth URL: {e}")
+            if st.session_state.get("gmail_auth_url"):
+                st.info("Click below to authorize Gmail access.")
+                st.markdown(
+                    f'[Authorize Gmail]({st.session_state["gmail_auth_url"]})'
+                )
 
-        if st.session_state.get("gmail_auth_url"):
-            st.info(
-                "**Click the link below** to authorize Gmail access. "
-                "After authorizing, you will be redirected back to this page automatically."
+        # Monitor controls
+        if gmail_monitor.is_authenticated():
+            gstatus = gmail_monitor.get_status()
+
+            st.caption(
+                f"**Status:** {'Running' if gstatus['running'] else 'Stopped'} · "
+                f"**Processed:** {gstatus['emails_processed']} · "
+                f"**Last poll:** {gstatus['last_poll_at'] or 'Never'}"
             )
-            st.markdown(
-                f'**[→ Click here to authorize Gmail]({st.session_state["gmail_auth_url"]})**'
-            )
 
-    # Step 3 — Monitor controls when authenticated
-    if gmail_monitor.is_authenticated():
-        gstatus = gmail_monitor.get_status()
+            if gstatus["last_error"]:
+                st.error(f"Error: {gstatus['last_error']}")
 
-        met1, met2, met3 = st.columns(3)
-        met1.metric("Monitor Status", "Running" if gstatus["running"] else "Stopped")
-        met2.metric("Emails Processed", gstatus["emails_processed"])
-        met3.metric("Last Poll", gstatus["last_poll_at"] or "Never")
-
-        if gstatus["last_error"]:
-            st.error(f"Last error: {gstatus['last_error']}")
-
-        btn_col1, btn_col2, btn_col3 = st.columns(3)
-
-        with btn_col1:
             if not gstatus["running"]:
-                if st.button("▶️ Start Monitor"):
+                if st.button("Start Monitor", key="btn_start_gmail"):
                     gmail_monitor.start()
                     st.rerun()
             else:
-                if st.button("⏹️ Stop Monitor"):
+                if st.button("Stop Monitor", key="btn_stop_gmail"):
                     gmail_monitor.stop()
                     st.rerun()
 
-        with btn_col2:
             interval = st.number_input(
-                "Poll Interval (seconds)",
+                "Poll interval (sec)",
                 min_value=60,
                 max_value=3600,
                 value=gmail_monitor.poll_interval,
                 step=60,
+                key="gmail_poll_interval",
             )
             if interval != gmail_monitor.poll_interval:
                 gmail_monitor.poll_interval = interval
 
-        with btn_col3:
-            if st.button("🚫 Revoke Gmail Access"):
+            if st.button("Revoke Gmail Access", key="btn_revoke_gmail"):
                 gmail_monitor.revoke_token()
                 st.rerun()
 
-    st.divider()
-    st.caption(
-        "**OAuth Redirect URI to register in Google Cloud Console:** "
-        f"`{os.getenv('APP_BASE_URL', 'http://localhost:8501')}/`"
-    )
+        st.caption(
+            f"**Redirect URI:** `{os.getenv('APP_BASE_URL', 'http://localhost:8501')}/`"
+        )
 
-    st.divider()
+    # ── Database Explorer ──────────────────────────────────────────────────────
+    with st.expander("Database Explorer", expanded=False):
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT tablename FROM pg_tables "
+                        "WHERE schemaname = 'public' ORDER BY tablename"
+                    )
+                    tables = [row[0] for row in cur.fetchall()]
+        except Exception as e:
+            st.error(f"DB error: {e}")
+            return
 
-    # ── Database Explorer ─────────────────────────────────────────────────────
-    st.subheader("Database Explorer")
+        if not tables:
+            st.info("No tables found.")
+            return
 
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                # List all user tables
-                cur.execute(
-                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
-                )
-                tables = [row[0] for row in cur.fetchall()]
-    except Exception as e:
-        st.error(f"Cannot connect to database: {e}")
-        return
-
-    if not tables:
-        st.info("No tables found.")
-        return
-
-    table_col, limit_col = st.columns([2, 1])
-    with table_col:
         selected_table = st.selectbox("Table", tables, key="db_explorer_table")
-    with limit_col:
-        row_limit = st.number_input("Row limit", min_value=10, max_value=1000, value=100, step=50, key="db_explorer_limit")
+        row_limit = st.number_input(
+            "Row limit",
+            min_value=10,
+            max_value=500,
+            value=50,
+            step=25,
+            key="db_explorer_limit",
+        )
 
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                # Row count
-                cur.execute(f"SELECT COUNT(*) FROM {selected_table}")  # noqa: S608
-                total_rows = cur.fetchone()[0]
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT COUNT(*) FROM {selected_table}")  # noqa: S608
+                    total_rows = cur.fetchone()[0]
 
-            df = pd.read_sql(
-                f"SELECT * FROM {selected_table} ORDER BY 1 DESC LIMIT %s",  # noqa: S608
-                conn,
-                params=(row_limit,),
-            )
-    except Exception as e:
-        st.error(f"Query error: {e}")
-        return
+                df = pd.read_sql(
+                    f"SELECT * FROM {selected_table} ORDER BY 1 DESC LIMIT %s",  # noqa: S608
+                    conn,
+                    params=(row_limit,),
+                )
+        except Exception as e:
+            st.error(f"Query error: {e}")
+            return
 
-    st.caption(f"**{selected_table}** — {total_rows} total rows (showing latest {min(row_limit, total_rows)})")
-    st.dataframe(df, use_container_width=True, height=400)
+        st.caption(
+            f"**{selected_table}** — {total_rows} rows "
+            f"(showing {min(row_limit, total_rows)})"
+        )
+        st.dataframe(df, use_container_width=True, height=250)
 
-    # ── Quick actions for staged_pos ──────────────────────────────────────
-    if selected_table == "staged_pos" and total_rows > 0:
-        st.markdown("**Quick Actions**")
-        act_col1, act_col2 = st.columns(2)
-
-        with act_col1:
-            if st.button("Delete ALL unprocessed records", type="secondary"):
+        # Quick actions for staged_pos
+        if selected_table == "staged_pos" and total_rows > 0:
+            st.caption("**Quick Actions**")
+            if st.button("Delete unprocessed", type="secondary", key="btn_del_unproc"):
                 with get_db_connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("DELETE FROM staged_pos WHERE status = 'unprocessed'")
+                        cur.execute(
+                            "DELETE FROM staged_pos WHERE status = 'unprocessed'"
+                        )
                         deleted = cur.rowcount
                     conn.commit()
-                st.success(f"Deleted {deleted} unprocessed records.")
+                st.success(f"Deleted {deleted} records.")
                 st.rerun()
 
-        with act_col2:
-            if st.button("Delete ALL records", type="secondary"):
+            if st.button("Delete ALL", type="secondary", key="btn_del_all"):
                 with get_db_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM staged_pos")

@@ -4,7 +4,7 @@ and stores extracted data in PostgreSQL.
 
 Key behaviours:
 - Only fetches UNREAD emails from tntpo@tntsupermarket.com
-- Marks emails as read after processing (requires gmail.modify scope)
+- Marks emails as read and labels them 'T&T PO/Processed' after processing
 - Detects region (east/west) from first PO's store ID
 - Stores received time in Toronto (America/Toronto) timezone
 - Stores email From header for tracking
@@ -77,6 +77,9 @@ class GmailMonitor:
     The background thread writes to the DB directly — never touches st.* objects.
     """
 
+    # Gmail label to apply after processing (must exist in the user's Gmail)
+    PROCESSED_LABEL_NAME = 'T&T PO/Processed'
+
     def __init__(
         self,
         db_conn_factory: Callable,
@@ -101,6 +104,7 @@ class GmailMonitor:
             'last_error': None,
             'emails_processed': 0,
         }
+        self._processed_label_id: Optional[str] = None
 
     # ──────────────────────────────────────────────
     # OAuth helpers (called from Streamlit UI thread)
@@ -279,15 +283,37 @@ class GmailMonitor:
             except Exception as e:
                 logger.error(f"Error processing message {msg_id}: {e}")
 
+    def _get_processed_label_id(self, service) -> Optional[str]:
+        """Look up the Gmail label ID for 'T&T PO/Processed' (cached after first call)."""
+        if self._processed_label_id:
+            return self._processed_label_id
+        try:
+            results = service.users().labels().list(userId='me').execute()
+            for label in results.get('labels', []):
+                if label['name'] == self.PROCESSED_LABEL_NAME:
+                    self._processed_label_id = label['id']
+                    logger.info(f"Found Gmail label '{self.PROCESSED_LABEL_NAME}' -> {label['id']}")
+                    return self._processed_label_id
+            logger.warning(f"Gmail label '{self.PROCESSED_LABEL_NAME}' not found — emails will only be marked as read")
+        except HttpError as e:
+            logger.warning(f"Failed to list Gmail labels: {e}")
+        return None
+
     def _mark_as_read(self, service, msg_id: str):
-        """Remove the UNREAD label from a Gmail message."""
+        """Remove UNREAD label and add 'T&T PO/Processed' label to a Gmail message."""
+        body: Dict = {'removeLabelIds': ['UNREAD']}
+
+        label_id = self._get_processed_label_id(service)
+        if label_id:
+            body['addLabelIds'] = [label_id]
+
         try:
             service.users().messages().modify(
                 userId='me',
                 id=msg_id,
-                body={'removeLabelIds': ['UNREAD']},
+                body=body,
             ).execute()
-            logger.debug(f"Marked message {msg_id} as read")
+            logger.debug(f"Marked message {msg_id} as read and labeled")
         except HttpError as e:
             logger.warning(f"Failed to mark message {msg_id} as read: {e}")
 

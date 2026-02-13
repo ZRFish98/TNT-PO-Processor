@@ -1,24 +1,26 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* Main Theme Variables - OLED EDITION */
+/* ── Atiara Brand Theme ─────────────────────────────────────────────────────── */
 :root {
-    --primary-gradient: linear-gradient(135deg, #00D1FF 0%, #007AFF 100%);
-    --secondary-gradient: linear-gradient(135deg, #00FFA3 0%, #00B376 100%);
-    --accent-gradient: linear-gradient(135deg, #A100FF 0%, #7000FF 100%);
+    --primary: #FF367F;
+    --primary-hover: #ff5a99;
+    --secondary: #8958FE;
+    --success: #22c55e;
+    --warning: #eab308;
+    --error: #ef4444;
     --bg-color: #000000;
-    --surface-color: #0F0F0F;
-    --border-color: #262626;
-    --text-main: #FFFFFF;
-    --text-dim: #A0A0A0;
-    --glass-bg: rgba(255, 255, 255, 0.03);
-    --glass-border: rgba(255, 255, 255, 0.1);
-    --neon-shadow: 0 0 20px rgba(0, 209, 255, 0.2);
+    --surface-color: #111111;
+    --surface-hover: #1a1a1a;
+    --border-color: #222222;
+    --border-hover: #333333;
+    --text-main: #ededed;
+    --text-dim: #737373;
 }
 
-/* Global Styles */
+/* ── Global ─────────────────────────────────────────────────────────────────── */
 .stApp {
     background-color: var(--bg-color);
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Poppins', sans-serif;
     color: var(--text-main);
 }
 
@@ -27,207 +29,282 @@
     margin: 0 auto;
 }
 
-/* Typography */
-h1,
-h2,
-h3 {
-    font-family: 'Outfit', sans-serif;
-    font-weight: 800;
-    letter-spacing: -1.5px;
-    background: var(--primary-gradient);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 1.5rem !important;
+/* ── Typography ─────────────────────────────────────────────────────────────── */
+h1, h2, h3 {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: var(--text-main);
+    -webkit-text-fill-color: unset;
+    background: none;
+    -webkit-background-clip: unset;
+    background-clip: unset;
+    margin-bottom: 1rem !important;
 }
+
+h1 { font-size: 1.75rem !important; }
+h2 { font-size: 1.35rem !important; }
+h3 { font-size: 1.1rem !important; }
 
 hr {
     border: none;
     height: 1px;
     background: var(--border-color);
-    margin: 2rem 0 !important;
+    margin: 1.5rem 0 !important;
 }
 
-h1 {
-    font-size: 3rem !important;
-}
-
-h2 {
-    font-size: 2.2rem !important;
-}
-
-h3 {
-    font-size: 1.6rem !important;
-}
-
-/* Sidebar Styling */
+/* ── Sidebar ────────────────────────────────────────────────────────────────── */
 section[data-testid="stSidebar"] {
-    background: var(--surface-color) !important;
+    background: var(--bg-color) !important;
     border-right: 1px solid var(--border-color);
-    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+    box-shadow: none;
 }
 
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
     background-color: transparent !important;
 }
 
-/* Custom indicator for sidebar selection */
-section[data-testid="stSidebar"] .stRadio>div {
-    gap: 10px;
-}
-
 section[data-testid="stSidebar"] label {
     color: var(--text-dim) !important;
-    font-size: 0.85rem !important;
-    font-weight: 600 !important;
-    text-transform: uppercase;
-    letter-spacing: 1.2px;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    text-transform: none;
+    letter-spacing: 0;
 }
 
-/* Container / Column Styling */
+section[data-testid="stSidebar"] .stRadio > div {
+    gap: 6px;
+}
+
+/* ── Columns ────────────────────────────────────────────────────────────────── */
 [data-testid="column"] {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: 20px;
-    padding: 2rem !important;
-    backdrop-filter: blur(12px);
-    transition: all 0.3s ease;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 1rem !important;
+    backdrop-filter: none;
+    transition: none;
 }
 
 [data-testid="column"]:hover {
-    border-color: rgba(0, 209, 255, 0.3);
-    box-shadow: var(--neon-shadow);
+    border-color: transparent;
+    box-shadow: none;
 }
 
-/* Input Fields */
+/* ── Input Fields ───────────────────────────────────────────────────────────── */
 .stTextInput input,
 .stTextArea textarea,
 .stNumberInput input {
-    background-color: #151515 !important;
-    color: white !important;
+    background-color: var(--surface-color) !important;
+    color: var(--text-main) !important;
     border: 1px solid var(--border-color) !important;
-    border-radius: 12px !important;
-    padding: 12px 16px !important;
+    border-radius: 6px !important;
+    padding: 8px 12px !important;
     font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.9rem !important;
+    font-size: 0.85rem !important;
 }
 
-.stTextInput input:focus {
-    border-color: #00D1FF !important;
-    box-shadow: 0 0 0 2px rgba(0, 209, 255, 0.2) !important;
+.stTextInput input:focus,
+.stTextArea textarea:focus,
+.stNumberInput input:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 1px var(--primary) !important;
 }
 
-/* Buttons */
-.stButton>button {
-    background: var(--primary-gradient) !important;
-    color: #000000 !important;
-    /* High contrast black on glow */
+/* ── Buttons ────────────────────────────────────────────────────────────────── */
+.stButton > button {
+    background: var(--primary) !important;
+    color: #ffffff !important;
     border: none !important;
-    border-radius: 14px !important;
-    padding: 0.8rem 2rem !important;
-    font-weight: 700 !important;
-    font-family: 'Outfit', sans-serif !important;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
-    box-shadow: 0 4px 15px rgba(0, 209, 255, 0.3) !important;
+    border-radius: 6px !important;
+    padding: 0.5rem 1.2rem !important;
+    font-weight: 500 !important;
+    font-family: 'Poppins', sans-serif !important;
+    font-size: 0.85rem !important;
+    text-transform: none;
+    letter-spacing: 0;
+    transition: background 0.15s ease !important;
+    box-shadow: none !important;
 }
 
-.stButton>button:hover {
-    transform: scale(1.03) translateY(-2px);
-    box-shadow: 0 8px 25px rgba(0, 209, 255, 0.5) !important;
+.stButton > button:hover {
+    background: var(--primary-hover) !important;
+    transform: none;
+    box-shadow: none !important;
     cursor: pointer;
 }
 
-.stButton>button[kind="primary"] {
-    background: var(--accent-gradient) !important;
-    color: white !important;
+.stButton > button[kind="secondary"] {
+    background: var(--surface-color) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-main) !important;
 }
 
-/* Metrics */
+.stButton > button[kind="secondary"]:hover {
+    background: var(--surface-hover) !important;
+    border-color: var(--border-hover) !important;
+}
+
+/* ── Metrics ────────────────────────────────────────────────────────────────── */
 [data-testid="stMetric"] {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--glass-border);
-    border-radius: 16px;
-    padding: 1.5rem !important;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem !important;
     text-align: center;
 }
 
 [data-testid="stMetricValue"] {
     font-family: 'JetBrains Mono', monospace;
-    font-weight: 800;
-    font-size: 2.5rem !important;
-    color: #FDFF85 !important;
-    /* Highlighted yellow/cyan for OLED pop */
+    font-weight: 700;
+    font-size: 2rem !important;
+    color: var(--text-main) !important;
 }
 
-/* Dataframe & Tables */
+/* ── Dataframe & Tables ─────────────────────────────────────────────────────── */
 div[data-testid="stDataFrame"] {
-    background: #0A0A0A !important;
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 0.5rem;
-}
-
-/* Status Messages */
-.stAlert {
-    background: rgba(255, 255, 255, 0.03) !important;
-    border: 1px solid var(--border-color) !important;
-    color: white !important;
-    border-radius: 15px !important;
-}
-
-.stSuccess {
-    border-left: 4px solid #00FFA3 !important;
-}
-
-.stError {
-    border-left: 4px solid #FF2D55 !important;
-}
-
-.stInfo {
-    border-left: 4px solid #00D1FF !important;
-}
-
-.stWarning {
-    border-left: 4px solid #FFB800 !important;
-}
-
-/* Wizard / Navigation indicator override */
-.nav-indicator {
     background: var(--surface-color) !important;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0;
+}
+
+/* ── Status Messages ────────────────────────────────────────────────────────── */
+.stAlert {
+    background: rgba(255, 255, 255, 0.02) !important;
     border: 1px solid var(--border-color) !important;
-    color: var(--text-dim) !important;
-    border-radius: 30px !important;
-    font-weight: 700 !important;
+    color: var(--text-main) !important;
+    border-radius: 8px !important;
+}
+
+.stSuccess { border-left: 3px solid var(--success) !important; }
+.stError { border-left: 3px solid var(--error) !important; }
+.stInfo { border-left: 3px solid var(--primary) !important; }
+.stWarning { border-left: 3px solid var(--warning) !important; }
+
+/* ── Expander ───────────────────────────────────────────────────────────────── */
+.streamlit-expanderHeader {
+    font-family: 'Poppins', sans-serif !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+    color: var(--text-main) !important;
+}
+
+/* ── Selectbox / Dropdown ───────────────────────────────────────────────────── */
+.stSelectbox > div > div {
+    background-color: var(--surface-color) !important;
+    border-color: var(--border-color) !important;
+    border-radius: 6px !important;
+}
+
+/* ── Tabs (horizontal radio styled as tabs) ─────────────────────────────────── */
+/* Hide the "nav" label text (label_visibility="collapsed" may not fully hide it) */
+.stMainBlockContainer .stRadio > label {
+    display: none !important;
+}
+
+.stMainBlockContainer .stRadio div[role="radiogroup"] {
+    gap: 2px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.stMainBlockContainer .stRadio label[data-baseweb="radio"] {
     padding: 8px 20px !important;
+    border-radius: 6px !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    font-family: 'Poppins', sans-serif !important;
+    color: var(--text-dim) !important;
+    transition: all 0.15s ease;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+    margin: 0 !important;
 }
 
-.nav-indicator-active {
-    background: var(--primary-gradient) !important;
-    color: #000 !important;
-    box-shadow: var(--neon-shadow) !important;
+.stMainBlockContainer .stRadio label[data-baseweb="radio"]:hover {
+    color: var(--text-main) !important;
+    background: var(--surface-hover);
 }
 
-/* Smooth Background Glow */
-.stApp::before {
-    content: "";
+.stMainBlockContainer .stRadio label[data-baseweb="radio"]:has(input:checked) {
+    background: var(--primary) !important;
+    color: #ffffff !important;
+}
+
+/* Hide radio circle dots — the visual dot is a div, not the input */
+.stMainBlockContainer .stRadio label[data-baseweb="radio"] > div:first-child {
+    display: none !important;
+}
+
+/* Also hide the actual radio input (Streamlit may still show it) */
+.stMainBlockContainer .stRadio input[type="radio"] {
+    display: none !important;
+}
+
+/* ── Streamlit Header — transparent, allow clicks through ───────────────────── */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    pointer-events: none !important;
+}
+
+header[data-testid="stHeader"] > div {
+    background: transparent !important;
+    pointer-events: none !important;
+}
+
+header[data-testid="stHeader"] [data-testid="stToolbar"],
+header[data-testid="stHeader"] [data-testid="stToolbar"] * {
+    pointer-events: auto !important;
+}
+
+/* ── Gear Button ────────────────────────────────────────────────────────────── */
+.gear-btn {
     position: fixed;
-    top: -10%;
-    right: -10%;
-    width: 600px;
-    height: 600px;
-    background: radial-gradient(circle, rgba(0, 209, 255, 0.05) 0%, rgba(0, 0, 0, 0) 70%);
-    z-index: -1;
+    top: 14px;
+    left: 60px;
+    z-index: 10000;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 18px;
+    transition: background 0.15s, border-color 0.15s;
+    text-decoration: none;
+    pointer-events: auto;
 }
 
-.stApp::after {
-    content: "";
-    position: fixed;
-    bottom: -10%;
-    left: -10%;
-    width: 500px;
-    height: 500px;
-    background: radial-gradient(circle, rgba(161, 0, 255, 0.05) 0%, rgba(0, 0, 0, 0) 70%);
-    z-index: -1;
+.gear-btn:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-hover);
+}
+
+/* ── File Uploader ──────────────────────────────────────────────────────────── */
+[data-testid="stFileUploader"] {
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+/* ── Tabs (native st.tabs) ──────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 2px;
+    background: var(--surface-color);
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 6px;
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    font-size: 0.85rem;
 }

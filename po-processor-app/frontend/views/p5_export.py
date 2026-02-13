@@ -1,18 +1,40 @@
 """
-Export page — Append to existing Odoo SO (Direct API) or Create New SO (Excel download).
+Export page — per-store Create New (Excel) or Append to existing SO (Odoo API).
+SO references are predicted and assigned here, not in Transform.
 """
 import io
-import json
 from datetime import datetime
+from typing import Any, Dict
 
 import pandas as pd
 import streamlit as st
 
+from backend.data_transformer import DataTransformer
 from database.connection import get_db_connection
 
 
+def _to_odoo_date(raw: str) -> str:
+    """Convert a date string to Odoo's YYYY-MM-DD format.
+
+    Handles MM/DD/YYYY and DD/MM/YYYY (falls back to dateutil).
+    Returns the original string if parsing fails.
+    """
+    if not raw:
+        return raw
+    # Already in YYYY-MM-DD?
+    if len(raw) >= 10 and raw[4] == "-":
+        return raw[:10]
+    from dateutil import parser as _dp
+    try:
+        return _dp.parse(raw, dayfirst=False).strftime("%Y-%m-%d")
+    except Exception:
+        return raw
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 def _to_excel(summaries: pd.DataFrame, lines: pd.DataFrame) -> bytes:
-    """Generate Odoo import Excel (same logic as original app.py)."""
+    """Generate Odoo import Excel for 'Create New' stores only."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         if not summaries.empty:
@@ -45,7 +67,7 @@ def _to_excel(summaries: pd.DataFrame, lines: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 
-def _mark_source_processed(source_po_ids: list):
+def _mark_source_processed(source_po_ids: list) -> None:
     """Mark staged_pos records as processed after export."""
     if not source_po_ids:
         return
@@ -63,196 +85,427 @@ def _mark_source_processed(source_po_ids: list):
         st.warning(f"Could not mark source records as processed: {e}")
 
 
-def render():
-    st.title("🚀 Export")
+# ── Main render ───────────────────────────────────────────────────────────────
+
+def render(settings: dict) -> None:
+    st.title("Export")
 
     line_details = st.session_state.get("line_details", pd.DataFrame())
     order_summaries = st.session_state.get("order_summaries", pd.DataFrame())
 
     if line_details.empty:
-        st.warning("No processed data found. Complete the Inventory Optimization step first.")
-        if st.button("← Back to Inventory"):
-            st.session_state["current_page"] = "Inventory Optimization"
+        st.warning("No processed data found. Complete the Transform & Review step first.")
+        if st.button("← Back to Transform & Review"):
+            st.session_state["current_page"] = "Transform & Review"
             st.rerun()
         return
 
+    client = st.session_state.get("odoo_client")
+
     # ── Summary stats ─────────────────────────────────────────────────────────
     st.subheader("Final Summary")
-    total_orders = line_details["store_id"].nunique()
-    total_lines = len(line_details[~line_details["flagged"]])
-    total_value = (
-        line_details[~line_details["flagged"]]["product_uom_qty"]
-        * line_details[~line_details["flagged"]]["price_unit"]
-    ).sum()
+    unflagged = line_details[~line_details["flagged"]]
+    total_stores = unflagged["store_id"].nunique()
+    total_lines = len(unflagged)
+    total_value = (unflagged["product_uom_qty"] * unflagged["price_unit"]).sum()
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Stores", total_orders)
+    c1.metric("Total Stores", total_stores)
     c2.metric("Export Lines (unflagged)", total_lines)
     c3.metric("Total Value", f"${total_value:,.2f}")
 
     st.divider()
 
-    # ── Store selector ────────────────────────────────────────────────────────
-    st.subheader("Select Store to Export")
+    # ── SO Reference section ──────────────────────────────────────────────────
+    st.subheader("SO Reference")
 
-    unique_stores = sorted(line_details["store_name"].unique().tolist())
-    # Get official names for display
-    store_name_map = {}
-    if not order_summaries.empty:
-        for _, row in order_summaries.iterrows():
-            store_name_map[row["store_name"]] = row.get("official_name", row["store_name"])
+    # Auto-fetch latest SO from Odoo
+    if "export_latest_so" not in st.session_state:
+        st.session_state["export_latest_so"] = None
+        st.session_state["export_so_fetched"] = False
 
-    store_options = {store_name_map.get(s, s): s for s in unique_stores}
+    if not st.session_state["export_so_fetched"] and client:
+        with st.spinner("Fetching latest SO number from Odoo..."):
+            fetched = client.get_latest_so_number()
+            if fetched:
+                st.session_state["export_latest_so"] = fetched
+                st.session_state["export_so_fetched"] = True
 
-    selected_display = st.selectbox(
-        "Store",
-        options=list(store_options.keys()),
-        key="export_store_selector",
-    )
-    selected_store_name = store_options[selected_display]
-    official_name = selected_display
+    so_col1, so_col2 = st.columns([2, 1])
+    with so_col1:
+        if st.session_state.get("export_so_fetched"):
+            st.info(f"Auto-fetched latest SO: **OATS00{st.session_state['export_latest_so']}**")
 
-    # Filter line_details for selected store
-    store_lines = line_details[
-        (line_details["store_name"] == selected_store_name) & (~line_details["flagged"])
-    ]
-    store_summary = order_summaries[order_summaries["store_name"] == selected_store_name]
+        latest_so_input = st.number_input(
+            "Latest SO Number in Odoo (override if needed)",
+            min_value=1,
+            step=1,
+            value=st.session_state.get("export_latest_so") or 1,
+            help=(
+                "Enter the numeric part of the latest SO in Odoo "
+                "(e.g. 3270 for OATS003270). "
+                "New SO references are calculated as: Latest + Total_Create_New_Orders + Index."
+            ),
+            key="export_so_input",
+        )
+        st.session_state["export_latest_so"] = latest_so_input
 
-    st.caption(
-        f"**{len(store_lines)}** unflagged lines for {official_name} | "
-        f"Value: **${(store_lines['product_uom_qty'] * store_lines['price_unit']).sum():,.2f}**"
-    )
+    with so_col2:
+        if st.button("Re-fetch from Odoo"):
+            if client:
+                fetched = client.get_latest_so_number()
+                if fetched:
+                    st.session_state["export_latest_so"] = fetched
+                    st.session_state["export_so_fetched"] = True
+                    st.rerun()  # rerun so number_input picks up new value
+                else:
+                    st.warning("Could not fetch — using manual value.")
+            else:
+                st.error("Not connected to Odoo.")
 
     st.divider()
 
-    # ── Append vs. Create ─────────────────────────────────────────────────────
-    st.subheader("Export Strategy")
+    # ── Fetch open SOs for all stores ─────────────────────────────────────────
+    if order_summaries.empty:
+        st.warning("No order summaries available.")
+        return
 
-    export_mode = st.radio(
-        "Choose action",
-        ["Create New Sales Order", "Append to Existing Sales Order"],
-        key="export_mode_radio",
-        horizontal=True,
+    # Build official name list for bulk lookup
+    tt_names = settings.get("tt_store_names", {})
+    store_ids = sorted(order_summaries["store_id"].unique().tolist())
+
+    # Get open orders from Odoo (cached in session state per export session)
+    if "export_open_orders" not in st.session_state:
+        st.session_state["export_open_orders"] = None
+
+    if st.session_state["export_open_orders"] is None and client:
+        partner_names = [
+            tt_names.get(int(sid), f"Store {sid}")
+            for sid in store_ids
+        ]
+        with st.spinner("Fetching open Sales Orders from Odoo..."):
+            open_orders_map = client.get_open_orders_for_stores(partner_names)
+        st.session_state["export_open_orders"] = open_orders_map
+    else:
+        open_orders_map = st.session_state.get("export_open_orders") or {}
+
+    if st.button("Refresh Open Orders"):
+        if client:
+            partner_names = [
+                tt_names.get(int(sid), f"Store {sid}")
+                for sid in store_ids
+            ]
+            with st.spinner("Re-fetching open Sales Orders..."):
+                open_orders_map = client.get_open_orders_for_stores(partner_names)
+            st.session_state["export_open_orders"] = open_orders_map
+            st.rerun()
+        else:
+            st.error("Not connected to Odoo.")
+
+    # ── Build per-store summary table ─────────────────────────────────────────
+    st.subheader("Sales Order Summary")
+    st.caption("Choose per store: **Create New** SO or **Append** to the latest undelivered SO.")
+
+    rows = []
+    for _, row in order_summaries.iterrows():
+        sid = row["store_id"]
+        official_name = row.get("official_name", tt_names.get(int(sid), f"Store {sid}"))
+
+        # Look up open order for this store
+        open_so = open_orders_map.get(official_name)
+        latest_so_name = open_so["name"] if open_so else "—"
+        latest_so_ref = open_so.get("client_order_ref", "") if open_so else ""
+
+        # Build action options
+        if open_so:
+            action_options = ["Create New", f"Append to {latest_so_name}"]
+        else:
+            action_options = ["Create New"]
+
+        # Default action
+        default_action = action_options[0]
+
+        rows.append({
+            "Import": True,
+            "store_id": int(sid),
+            "store_name": official_name,
+            "po_numbers": row.get("po_numbers", ""),
+            "order_date": row.get("order_date", ""),
+            "delivery_date": row.get("delivery_date", ""),
+            "total_lines": int(row.get("total_lines", 0)),
+            "total_value": float(row.get("total_value", 0)),
+            "po_count": int(row.get("po_count", 0)),
+            "latest_undelivered_so": latest_so_name,
+            "latest_so_po_ref": latest_so_ref,
+            "_open_so_id": open_so["id"] if open_so else None,
+            "_action_options": action_options,
+            "Action": default_action,
+        })
+
+    summary_df = pd.DataFrame(rows)
+
+    # Use data_editor for per-store action + import selection
+    display_df = summary_df[[
+        "Import", "Action", "latest_undelivered_so",
+        "store_id", "store_name", "po_numbers",
+        "order_date", "delivery_date", "total_lines", "total_value",
+        "po_count", "latest_so_po_ref",
+    ]].copy()
+
+    # Build per-row action options for the selectbox column
+    all_action_options = set()
+    for r in rows:
+        all_action_options.update(r["_action_options"])
+    all_action_options_list = sorted(all_action_options)
+
+    edited = st.data_editor(
+        display_df,
+        key="export_summary_editor",
+        num_rows="fixed",
+        height=min(400, 60 + 35 * len(display_df)),
+        column_config={
+            "Import": st.column_config.CheckboxColumn("Import", width="small"),
+            "Action": st.column_config.SelectboxColumn(
+                "Action",
+                options=all_action_options_list,
+                width="medium",
+                required=True,
+            ),
+            "latest_undelivered_so": st.column_config.TextColumn("Latest Undelivered SO"),
+            "store_id": st.column_config.NumberColumn("Store ID", width="small"),
+            "store_name": st.column_config.TextColumn("Store Name"),
+            "po_numbers": st.column_config.TextColumn("PO Numbers"),
+            "order_date": st.column_config.TextColumn("Order Date", width="small"),
+            "delivery_date": st.column_config.TextColumn("Delivery Date", width="small"),
+            "total_lines": st.column_config.NumberColumn("Lines", width="small"),
+            "total_value": st.column_config.NumberColumn("Value", format="$%.2f", width="small"),
+            "po_count": st.column_config.NumberColumn("POs", width="small"),
+            "latest_so_po_ref": st.column_config.TextColumn("Existing PO Ref"),
+        },
+        disabled=[c for c in display_df.columns if c not in ("Action", "Import")],
+        hide_index=True,
+        use_container_width=True,
     )
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # PATH A: Create New SO → Excel download
-    # ═══════════════════════════════════════════════════════════════════════════
-    if export_mode == "Create New Sales Order":
-        if not store_summary.empty:
-            so_ref = store_summary.iloc[0].get("so_reference", "N/A")
-            st.info(f"New SO will be created with reference: **{so_ref}**")
+    # Parse user selections — only include rows where Import is checked
+    create_new_stores = []
+    append_stores = []
 
-        st.markdown("Download the Excel file and import it into Odoo.")
+    for idx, erow in edited.iterrows():
+        if not erow.get("Import", True):
+            continue  # skip unchecked stores
 
-        if not order_summaries.empty:
-            excel_bytes = _to_excel(order_summaries, line_details)
-            if st.download_button(
-                label="📥 Download Odoo Import Excel",
-                data=excel_bytes,
-                file_name=f"odoo_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ):
-                _mark_source_processed(st.session_state.get("source_po_ids", []))
-                st.success("✅ Export complete. Source POs marked as processed.")
-        else:
-            st.warning("No order summaries to export.")
+        action = erow["Action"]
+        sid = int(summary_df.loc[idx, "store_id"])
+        open_so_id = summary_df.loc[idx, "_open_so_id"]
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # PATH B: Append to Existing SO → Direct Odoo API
-    # ═══════════════════════════════════════════════════════════════════════════
+        if action == "Create New":
+            create_new_stores.append(sid)
+        elif action.startswith("Append to") and open_so_id:
+            append_stores.append({
+                "store_id": sid,
+                "so_id": int(open_so_id),
+                "so_name": action.replace("Append to ", ""),
+                "existing_po_ref": str(summary_df.loc[idx, "latest_so_po_ref"] or ""),
+                "new_po_numbers": str(summary_df.loc[idx, "po_numbers"]),
+            })
+
+    # Show predicted SO refs for Create New stores
+    latest_so = st.session_state.get("export_latest_so") or 0
+    if create_new_stores:
+        so_ref_map = DataTransformer.generate_so_references(create_new_stores, latest_so)
+        first_ref = min(so_ref_map.values())
+        last_ref = max(so_ref_map.values())
+        st.info(
+            f"**Create New** ({len(create_new_stores)} stores): "
+            f"Predicted SO range: {first_ref} → {last_ref}"
+        )
     else:
-        client = st.session_state.get("odoo_client")
-        if not client:
-            st.error("Connect to Odoo first (Settings page).")
-            return
+        so_ref_map = {}
 
-        # Fetch open SOs for this store
-        fetch_col, _ = st.columns([1, 3])
-        with fetch_col:
-            if st.button("🔍 Load Open Sales Orders"):
-                with st.spinner(f"Fetching open SOs for {official_name}..."):
-                    open_orders = client.get_open_sales_orders(official_name)
-                st.session_state["open_sales_orders"] = open_orders
-                st.session_state["selected_so_id"] = None
+    if append_stores:
+        st.info(
+            f"**Append** ({len(append_stores)} stores): "
+            f"Lines will be added to existing SOs via Odoo API."
+        )
 
-        open_orders = st.session_state.get("open_sales_orders", [])
+    st.divider()
 
-        if open_orders:
-            st.markdown(f"**{len(open_orders)} open Sales Order(s)** for {official_name}:")
+    # ── Execute ───────────────────────────────────────────────────────────────
+    st.subheader("Execute")
 
-            # Build display DataFrame
-            so_df = pd.DataFrame(open_orders)
-            so_display = so_df[[c for c in [
-                "id", "name", "state", "delivery_status",
-                "client_order_ref", "create_date", "x_studio_delivery_date",
-            ] if c in so_df.columns]].copy()
-
-            so_display.insert(0, "Select", False)
-
-            edited_so = st.data_editor(
-                so_display,
-                key="so_selector",
-                num_rows="fixed",
-                column_config={
-                    "Select": st.column_config.CheckboxColumn("Select", width="small"),
-                    "name": st.column_config.TextColumn("SO #"),
-                    "state": st.column_config.TextColumn("State"),
-                    "delivery_status": st.column_config.TextColumn("Delivery"),
-                    "client_order_ref": st.column_config.TextColumn("PO Ref"),
-                    "create_date": st.column_config.TextColumn("Created"),
-                    "x_studio_delivery_date": st.column_config.TextColumn("Delivery Date"),
-                },
-                disabled=[c for c in so_display.columns if c != "Select"],
-                hide_index=True,
-                use_container_width=True,
+    if not client:
+        st.error("Connect to Odoo first (Settings page).")
+    elif not create_new_stores and not append_stores:
+        st.caption("No stores to process.")
+    else:
+        # Preview what will happen
+        if create_new_stores:
+            create_lines = line_details[
+                line_details["store_id"].isin(create_new_stores) & ~line_details["flagged"]
+            ]
+            st.markdown(
+                f"**Create New:** {len(create_new_stores)} store(s), "
+                f"{len(create_lines)} unflagged lines"
+            )
+        if append_stores:
+            append_line_count = sum(
+                len(line_details[
+                    (line_details["store_id"] == item["store_id"]) & ~line_details["flagged"]
+                ])
+                for item in append_stores
+            )
+            st.markdown(
+                f"**Append:** {len(append_stores)} store(s), "
+                f"{append_line_count} unflagged lines"
             )
 
-            selected_so_rows = edited_so[edited_so["Select"] == True]
+        btn_col, dl_col = st.columns([1, 1])
 
-            if len(selected_so_rows) > 1:
-                st.warning("Select only ONE Sales Order to append to.")
-            elif len(selected_so_rows) == 1:
-                row_idx = selected_so_rows.index[0]
-                so_id = int(so_df.loc[row_idx, "id"])
-                so_name = so_df.loc[row_idx, "name"]
-                st.session_state["selected_so_id"] = so_id
-
-                st.info(f"Will append **{len(store_lines)} lines** to **{so_name}** (ID: {so_id})")
-
-                # Preview lines
-                with st.expander("Preview lines to append"):
-                    preview = store_lines[["internal_reference", "product_name", "product_uom_qty", "price_unit"]].copy()
-                    st.dataframe(preview, use_container_width=True)
-
-                if st.button("📎 Append Lines to Odoo SO", type="primary"):
-                    lines_payload = store_lines[
-                        ["product_id", "product_uom_qty", "price_unit"]
-                    ].to_dict(orient="records")
-
-                    with st.spinner(f"Appending {len(lines_payload)} lines to {so_name}..."):
-                        created_ids, failed_lines = client.append_lines_to_order(so_id, lines_payload)
-
-                    if created_ids:
-                        st.success(f"✅ Successfully appended {len(created_ids)} line(s) to {so_name}.")
-
-                    if failed_lines:
-                        st.error(f"❌ {len(failed_lines)} line(s) failed:")
-                        for fl in failed_lines:
-                            st.write(f"  Line {fl['index']}: {fl['error']}")
-
-                    if created_ids:
-                        _mark_source_processed(st.session_state.get("source_po_ids", []))
-                        st.session_state["append_result"] = {
-                            "created_ids": created_ids,
-                            "failed_lines": failed_lines,
-                            "so_name": so_name,
-                        }
-
-        elif st.session_state.get("open_sales_orders") is not None:
-            st.info(
-                f"No open (non-delivered, non-test) Sales Orders found for {official_name}. "
-                "Switch to 'Create New Sales Order' or verify the store name in Odoo."
+        with btn_col:
+            selected_count = len(create_new_stores) + len(append_stores)
+            import_clicked = st.button(
+                f"Import Selected ({selected_count}) to Odoo",
+                type="primary",
+                key="export_api_btn",
             )
-        else:
-            st.caption("Click 'Load Open Sales Orders' to see existing orders for this store.")
+
+        # Optional Excel download for Create New stores
+        with dl_col:
+            if create_new_stores:
+                create_summaries = order_summaries[
+                    order_summaries["store_id"].isin(create_new_stores)
+                ].copy()
+                create_lines_xl = line_details[
+                    line_details["store_id"].isin(create_new_stores)
+                ].copy()
+                create_lines_xl["so_reference"] = create_lines_xl["store_id"].map(so_ref_map)
+                excel_bytes = _to_excel(create_summaries, create_lines_xl)
+                st.download_button(
+                    label="Download Excel (backup)",
+                    data=excel_bytes,
+                    file_name=f"odoo_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="export_excel_download",
+                )
+
+        if import_clicked:
+            all_success = True
+
+            # ── Create New SOs via API ────────────────────────────────────
+            for sid in create_new_stores:
+                store_summary = order_summaries[order_summaries["store_id"] == sid].iloc[0]
+                official_name = store_summary.get("official_name", f"Store {sid}")
+                po_numbers = store_summary.get("po_numbers", "")
+                order_date = _to_odoo_date(str(store_summary.get("order_date", "")))
+                delivery_date = _to_odoo_date(str(store_summary.get("delivery_date", "")))
+
+                store_lines = line_details[
+                    (line_details["store_id"] == sid) & (~line_details["flagged"])
+                ]
+
+                # Look up partner ID
+                partner_id = client.get_partner_id_by_name(official_name)
+                if not partner_id:
+                    st.error(f"Partner not found in Odoo: {official_name}")
+                    all_success = False
+                    continue
+
+                # Create the SO header
+                with st.spinner(f"Creating SO for {official_name}..."):
+                    try:
+                        so_id, so_name = client.create_sales_order(
+                            customer_id=partner_id,
+                            date_order=order_date or None,
+                            client_order_ref=po_numbers or None,
+                        )
+                        # Set delivery date if available
+                        if delivery_date:
+                            try:
+                                client.models.execute_kw(
+                                    client.db, client.uid, client.api_key,
+                                    'sale.order', 'write',
+                                    [[so_id], {'x_studio_delivery_date': delivery_date}]
+                                )
+                            except Exception:
+                                pass  # Non-critical
+
+                        st.success(f"Created {so_name} for {official_name}")
+                    except Exception as e:
+                        st.error(f"Failed to create SO for {official_name}: {e}")
+                        all_success = False
+                        continue
+
+                # Add lines to the newly created SO
+                lines_payload = store_lines[
+                    ["product_id", "product_uom_qty", "price_unit"]
+                ].to_dict(orient="records")
+
+                with st.spinner(f"Adding {len(lines_payload)} lines to {so_name}..."):
+                    created_ids, failed_lines = client.append_lines_to_order(
+                        so_id, lines_payload
+                    )
+
+                if created_ids:
+                    st.caption(f"Added {len(created_ids)} line(s) to {so_name}")
+                if failed_lines:
+                    all_success = False
+                    st.error(f"{len(failed_lines)} line(s) failed for {so_name}")
+                    for fl in failed_lines:
+                        st.write(f"  Line {fl['index']}: {fl['error']}")
+
+            # ── Append to Existing SOs via API ────────────────────────────
+            for item in append_stores:
+                sid = item["store_id"]
+                so_id = item["so_id"]
+                so_name = item["so_name"]
+
+                store_lines = line_details[
+                    (line_details["store_id"] == sid) & (~line_details["flagged"])
+                ]
+                lines_payload = store_lines[
+                    ["product_id", "product_uom_qty", "price_unit"]
+                ].to_dict(orient="records")
+
+                with st.spinner(f"Appending {len(lines_payload)} lines to {so_name}..."):
+                    created_ids, failed_lines = client.append_lines_to_order(
+                        so_id, lines_payload
+                    )
+
+                if created_ids:
+                    st.success(f"Appended {len(created_ids)} line(s) to {so_name}")
+                if failed_lines:
+                    all_success = False
+                    st.error(f"{len(failed_lines)} line(s) failed for {so_name}")
+                    for fl in failed_lines:
+                        st.write(f"  Line {fl['index']}: {fl['error']}")
+
+                # Update client_order_ref (append PO numbers)
+                existing_ref = item["existing_po_ref"]
+                new_pos = item["new_po_numbers"]
+                if existing_ref and new_pos:
+                    merged_ref = f"{existing_ref}, {new_pos}"
+                elif new_pos:
+                    merged_ref = new_pos
+                else:
+                    merged_ref = existing_ref
+
+                if merged_ref:
+                    ok = client.update_client_order_ref(so_id, merged_ref)
+                    if ok:
+                        st.caption(f"Updated PO ref on {so_name}: {merged_ref}")
+                    else:
+                        st.warning(f"Failed to update PO ref on {so_name}")
+
+            # Mark source POs as processed
+            if all_success:
+                _mark_source_processed(st.session_state.get("source_po_ids", []))
+                st.success("All operations complete. Source POs marked as processed.")
+
+    # ── Reset for next batch ──────────────────────────────────────────────────
+    st.divider()
+    if st.button("Clear Export State"):
+        st.session_state.pop("export_open_orders", None)
+        st.session_state.pop("export_latest_so", None)
+        st.session_state.pop("export_so_fetched", None)
+        st.rerun()

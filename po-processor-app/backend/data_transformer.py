@@ -24,27 +24,36 @@ class DataTransformer:
             return 'CW'
         return 'CE'
 
-    def transform_data(self,
-                     po_df: pd.DataFrame,
-                     product_variants: List[Dict[str, Any]],
-                     latest_so_number: int) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
+    @staticmethod
+    def generate_so_references(store_ids: List[int], latest_so_number: int) -> Dict[int, str]:
+        """Generate predicted SO references for a list of store IDs.
+
+        Uses Odoo's buggy formula: first SO = latest + N + 1 (where N = total stores).
+        Returns {store_id: "OATS00XXXX"} mapping.
+        """
+        sorted_stores = sorted(store_ids)
+        total = len(sorted_stores)
+        return {
+            sid: f"OATS00{latest_so_number + total + (i + 1)}"
+            for i, sid in enumerate(sorted_stores)
+        }
+
+    def transform_data(
+        self,
+        po_df: pd.DataFrame,
+        product_variants: List[Dict[str, Any]],
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
         """
         Transform extracted PO data into Odoo-ready format.
 
         Args:
             po_df: DataFrame containing extracted PDF data
             product_variants: List of product dictionaries from Odoo API
-            latest_so_number: The latest SO number in Odoo (e.g., 3270 for OATS003270)
 
         Returns:
-            order_summaries: DataFrame (headers)
-            order_line_details: DataFrame (lines)
+            order_summaries: DataFrame (headers — no SO references)
+            order_line_details: DataFrame (lines — no SO references)
             errors: List of error strings
-
-        Note:
-            Odoo has a bug where when importing N orders, the first order gets
-            Latest + N + 1 instead of Latest + 1. This method calculates SO
-            references based on that buggy behavior.
         """
         errors = []
         
@@ -197,37 +206,24 @@ class DataTransformer:
 
         order_line_details = pd.DataFrame(expanded_lines)
         
-        # Create Summaries (Headers) and Assign SO Refs
-        # Group by Store ID
+        # Create Summaries (Headers) grouped by Store ID
         summaries = []
-        
-        # We need to map Store ID -> SO Ref to add back to lines
-        store_so_map = {}
-        
+
         if not order_line_details.empty:
             # Filter out invalid Store IDs (NaN, 0, etc)
             order_line_details = order_line_details.dropna(subset=['store_id'])
 
-            # Sort by Store ID for consistent numbering
+            # Sort by Store ID for consistent ordering
             unique_stores = sorted(order_line_details['store_id'].unique().tolist())
-            total_stores = len(unique_stores)
 
-            for index, store_id in enumerate(unique_stores):
-                # Calculate SO Reference using Odoo's buggy formula:
-                # First SO = Latest + Total_Count + 1
-                # Second SO = Latest + Total_Count + 2, etc.
-                # Formula: Latest + Total_Count + (index + 1)
-                current_ref_num = latest_so_number + total_stores + (index + 1)
-                so_ref = f"OATS00{current_ref_num}"
-                store_so_map[store_id] = so_ref
-                
+            for store_id in unique_stores:
                 group = order_line_details[order_line_details['store_id'] == store_id]
                 wh = self.get_warehouse_for_store(store_id)
-                
+
                 # Store Mapping from settings
                 tt_names = self.settings.get('tt_store_names', {})
                 official_name = tt_names.get(int(store_id), f"Store {store_id}")
-                
+
                 # Group PO Numbers
                 po_list = sorted(group['po_number'].unique().astype(str).tolist())
                 po_numbers_str = ", ".join(po_list)
@@ -242,16 +238,12 @@ class DataTransformer:
                     'official_name': official_name,
                     'warehouse': wh,
                     'po_count': len(po_list),
-                    'po_numbers': po_numbers_str, # User requested PO Number here
-                    'so_reference': so_ref,       # Generated SO Ref
+                    'po_numbers': po_numbers_str,
                     'order_date': order_date,
                     'delivery_date': delivery_date,
                     'total_lines': len(group),
-                    'total_value': group['total_price'].sum()
+                    'total_value': group['total_price'].sum(),
                 })
-                
-            # Add SO Reference back to Line Details
-            order_line_details['so_reference'] = order_line_details['store_id'].map(store_so_map)
 
         order_summaries = pd.DataFrame(summaries)
         
