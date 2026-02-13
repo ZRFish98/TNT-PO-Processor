@@ -232,17 +232,17 @@ def render(settings: dict):
         selected_rows = edited[edited["Select"] == True]
         selected_ids = queue_df.loc[selected_rows.index, "id"].tolist()
 
-        # Filter to only unprocessed / error rows
+        # Filter to processable rows (unprocessed, processing, error)
         valid_ids = queue_df.loc[
             (queue_df["id"].isin(selected_ids)) &
-            (queue_df["status"].isin(["unprocessed", "error"])),
+            (queue_df["status"].isin(["unprocessed", "processing", "error"])),
             "id"
         ].tolist()
 
         if selected_ids:
             invalid_count = len(selected_ids) - len(valid_ids)
             if invalid_count:
-                st.warning(f"{invalid_count} selected item(s) are already processed or processing — they will be skipped.")
+                st.warning(f"{invalid_count} selected item(s) are already processed — they will be skipped.")
 
         btn_col, stat_col = st.columns([1, 3])
         with btn_col:
@@ -280,17 +280,32 @@ def render(settings: dict):
             )
             st.caption(summary)
 
-        # Clear processed button
-        if st.button("Clear Processed (older than 7 days)"):
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "DELETE FROM staged_pos WHERE status='processed' "
-                        "AND processed_at < NOW() - INTERVAL '7 days'"
-                    )
-                conn.commit()
-            st.success("Cleared old processed records.")
-            st.rerun()
+        # Delete / Clear buttons
+        del_col1, del_col2 = st.columns([1, 1])
+        with del_col1:
+            if st.button(
+                f"Delete Selected ({len(selected_ids)})",
+                disabled=len(selected_ids) == 0,
+            ):
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "DELETE FROM staged_pos WHERE id = ANY(%s)",
+                            (selected_ids,),
+                        )
+                    conn.commit()
+                st.success(f"Deleted {len(selected_ids)} record(s).")
+                st.rerun()
+        with del_col2:
+            if st.button("Clear All Processed"):
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "DELETE FROM staged_pos WHERE status='processed'"
+                        )
+                    conn.commit()
+                st.success("Cleared all processed records.")
+                st.rerun()
 
     st.divider()
 
