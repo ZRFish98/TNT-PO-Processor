@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS staged_pos (
     delivery_date       TEXT,
     region              VARCHAR(10),
     extracted_data      JSONB NOT NULL DEFAULT '[]',
+    pdf_content         BYTEA,
+    pdf_page_count      INTEGER,
+    last_downloaded_at  TIMESTAMPTZ,
     status              VARCHAR(20) NOT NULL DEFAULT 'unprocessed',
     error_message       TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -54,6 +57,9 @@ ON CONFLICT (key) DO NOTHING;
 _MIGRATE_SQL = """
 ALTER TABLE staged_pos ADD COLUMN IF NOT EXISTS gmail_from TEXT;
 ALTER TABLE staged_pos ADD COLUMN IF NOT EXISTS region VARCHAR(10);
+ALTER TABLE staged_pos ADD COLUMN IF NOT EXISTS pdf_content BYTEA;
+ALTER TABLE staged_pos ADD COLUMN IF NOT EXISTS pdf_page_count INTEGER;
+ALTER TABLE staged_pos ADD COLUMN IF NOT EXISTS last_downloaded_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_staged_pos_region ON staged_pos(region);
 """
 

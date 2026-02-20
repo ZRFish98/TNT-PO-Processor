@@ -21,10 +21,10 @@ from database.connection import get_db_connection
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="T&T PO Processor",
+    page_title="Atiara Internal Tool",
     page_icon="🛒",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="auto",
 )
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
@@ -125,8 +125,6 @@ _DEFAULTS = {
     "line_details": pd.DataFrame(),
     "transform_errors": [],
     # Export (SO ref + open orders are managed locally in p5_export.py)
-    # Navigation
-    "current_page": "Dashboard",
 }
 
 for k, v in _DEFAULTS.items():
@@ -196,18 +194,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Gear button (opens sidebar settings) ──────────────────────────────────────
-st.markdown(
-    """
-    <div class="gear-btn" onclick="
-        var btn = parent.document.querySelector('[data-testid=\\'collapsedControl\\']')
-               || parent.document.querySelector('[data-testid=\\'stSidebarCollapseButton\\']');
-        if (btn) btn.click();
-    " title="Settings">&#9881;</div>
-    """,
-    unsafe_allow_html=True,
-)
-
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown("""
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:0.75rem;">
@@ -219,7 +205,7 @@ st.markdown("""
             <h1 style="margin:0; line-height:1; font-size:1.2rem !important;
                        font-family:'Poppins',sans-serif; font-weight:600;
                        color:#ededed; -webkit-text-fill-color:#ededed;">
-                T&T PO Processor</h1>
+                Atiara Internal Tool</h1>
             <p style="color:#737373; font-size:0.68rem; margin:0;
                       font-family:'Poppins',sans-serif; letter-spacing:2px;
                       text-transform:uppercase;">
@@ -228,38 +214,40 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# ── Horizontal tab navigation ─────────────────────────────────────────────────
-PAGES = ["Dashboard", "Transform & Review", "Export"]
+# ── Multipage navigation ──────────────────────────────────────────────────────
+import frontend.views.po_processor as _po_processor
+import frontend.views.invoice_verification as _invoice_verification
+import frontend.views.return_processor as _return_processor
+import frontend.views.p1_settings as _p1_settings
 
-if st.session_state["current_page"] not in PAGES:
-    st.session_state["current_page"] = "Dashboard"
-
-page = st.radio(
-    "nav",
-    PAGES,
-    index=PAGES.index(st.session_state["current_page"]),
-    horizontal=True,
-    label_visibility="collapsed",
-    key="main_nav",
+_po_page = st.Page(
+    lambda: _po_processor.render(settings),
+    title="T&T PO Processor",
+    icon=":material/shopping_cart:",
+    url_path="po-processor",
+    default=True,
 )
-st.session_state["current_page"] = page
+_invoice_page = st.Page(
+    lambda: _invoice_verification.render(settings),
+    title="Invoice Verification",
+    icon=":material/receipt_long:",
+    url_path="invoice-verification",
+)
+_return_page = st.Page(
+    lambda: _return_processor.render(settings),
+    title="Return Processor",
+    icon=":material/undo:",
+    url_path="return-processor",
+)
+_settings_page = st.Page(
+    lambda: _p1_settings.render(settings, get_gmail_monitor()),
+    title="Settings",
+    icon=":material/settings:",
+    url_path="settings",
+)
 
-st.divider()
-
-# ── Sidebar: Settings panel ───────────────────────────────────────────────────
-with st.sidebar:
-    from frontend.views.p1_settings import render as render_settings
-    render_settings(settings, get_gmail_monitor())
-
-# ── Route to page module ───────────────────────────────────────────────────────
-if page == "Dashboard":
-    from frontend.views.p2_queue import render
-    render(settings)
-
-elif page == "Transform & Review":
-    from frontend.views.p4_inventory import render
-    render(settings)
-
-elif page == "Export":
-    from frontend.views.p5_export import render
-    render(settings)
+pg = st.navigation({
+    "Workflows": [_po_page, _invoice_page, _return_page],
+    "": [_settings_page],
+})
+pg.run()

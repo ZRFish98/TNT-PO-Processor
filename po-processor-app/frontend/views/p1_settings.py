@@ -11,7 +11,7 @@ load_dotenv()
 
 
 def render(settings: dict, gmail_monitor) -> None:
-    st.markdown("#### ⚙️ Settings")
+    st.title("Settings")
 
     # ── Odoo Connection ────────────────────────────────────────────────────────
     with st.expander("Odoo Connection", expanded=True):

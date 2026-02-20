@@ -373,6 +373,7 @@ class GmailMonitor:
                     filename=filename or 'attachment.pdf',
                     extracted_data=[],
                     errors=[f"Download failed: {e}"],
+                    pdf_content=None,
                 )
                 continue
 
@@ -387,6 +388,7 @@ class GmailMonitor:
                 filename=filename or 'attachment.pdf',
                 extracted_data=extracted_data,
                 errors=errors,
+                pdf_content=pdf_bytes,
             )
 
             # Each email has only one PDF — break after first
@@ -394,6 +396,16 @@ class GmailMonitor:
 
         if not pdf_found:
             logger.debug(f"Message {msg_id} matched query but contained no PDF attachments")
+
+    @staticmethod
+    def _count_pdf_pages(pdf_bytes: bytes) -> Optional[int]:
+        """Count pages in a PDF from raw bytes."""
+        try:
+            import pdfplumber
+            with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+                return len(pdf.pages)
+        except Exception:
+            return None
 
     def _save_to_db(
         self,
@@ -404,8 +416,11 @@ class GmailMonitor:
         filename: str,
         extracted_data: list,
         errors: list,
+        pdf_content: bytes | None = None,
     ):
         """Insert a staged_pos record into PostgreSQL."""
+        import psycopg2 as _psycopg2
+
         po_number = store_id = store_name = order_date = delivery_date = None
 
         if extracted_data:
@@ -418,6 +433,7 @@ class GmailMonitor:
 
         # Detect region from first PO's store ID
         region = _detect_region(extracted_data, self.cw_stores)
+        page_count = self._count_pdf_pages(pdf_content) if pdf_content else None
 
         status = 'unprocessed' if extracted_data else 'error'
         error_message = '; '.join(errors) if errors and not extracted_data else None
@@ -428,13 +444,15 @@ class GmailMonitor:
                 gmail_received_at, original_filename,
                 po_number, store_id, store_name,
                 order_date, delivery_date, region,
-                extracted_data, status, error_message
+                extracted_data, status, error_message,
+                pdf_content, pdf_page_count
             ) VALUES (
                 'gmail', %s, %s, %s,
                 %s, %s,
                 %s, %s, %s,
                 %s, %s, %s,
-                %s::jsonb, %s, %s
+                %s::jsonb, %s, %s,
+                %s, %s
             )
             ON CONFLICT (gmail_message_id) WHERE gmail_message_id IS NOT NULL DO NOTHING
         """
@@ -449,6 +467,8 @@ class GmailMonitor:
                         order_date, delivery_date, region,
                         json.dumps(extracted_data),
                         status, error_message,
+                        _psycopg2.Binary(pdf_content) if pdf_content else None,
+                        page_count,
                     ))
                 conn.commit()
 

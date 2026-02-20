@@ -76,10 +76,7 @@ def render(settings: dict):
     # ── No line_details yet → show transform controls ─────────────────────────
     if st.session_state["line_details"].empty:
         if st.session_state["extracted_po_data"].empty:
-            st.warning("No PO data loaded. Go to Dashboard and select POs to process.")
-            if st.button("← Back to Dashboard"):
-                st.session_state["current_page"] = "Dashboard"
-                st.rerun()
+            st.warning("No PO data loaded. Go to the Dashboard tab and select POs to process.")
             return
 
         client = st.session_state.get("odoo_client")
@@ -166,11 +163,12 @@ def render(settings: dict):
     extracted = st.session_state.get("extracted_po_data", pd.DataFrame())
     line_det = st.session_state["line_details"]
 
-    if not extracted.empty and not line_det.empty:
-        # SKUs present in extracted PDF data but absent from matched line_details
+    odoo_cache = st.session_state.get("odoo_products_cache")
+    if not extracted.empty and odoo_cache:
+        # SKUs present in PDF but absent from the Odoo product catalog
         pdf_skus = set(extracted["Internal Reference"].astype(str).unique())
-        matched_skus = set(line_det["internal_reference"].astype(str).unique())
-        missing_skus = pdf_skus - matched_skus
+        odoo_skus = {str(p.get("default_code", "")) for p in odoo_cache if p.get("default_code")}
+        missing_skus = pdf_skus - odoo_skus
 
         if missing_skus:
             st.subheader("Unmatched SKUs")
@@ -372,7 +370,7 @@ def render(settings: dict):
 
     st.divider()
     if st.button("Next: Export →", type="primary"):
-        st.session_state["current_page"] = "Export"
+        st.session_state["po_active_tab"] = "Export"
         st.rerun()
 
 
@@ -453,6 +451,7 @@ def _render_warehouse_tab(warehouse_code: str):
         save_clicked = st.button(
             f"Save Changes ({warehouse_code})",
             key=f"save_{warehouse_code}",
+            type="primary",
         )
 
     # Apply filters

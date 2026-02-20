@@ -175,3 +175,176 @@ ODOO_API_KEY=<api_key>
 - Odoo connection defaults (URL and database name)
 - Warehouse-store mappings (`cw_stores` list)
 - Complete store name mappings (`tt_store_names`)
+
+---
+
+## External APIs & Connections
+
+### Odoo (XML-RPC)
+
+- **URL**: `https://atiara-trading-inc.odoo.com`
+- **Database**: `atiara-trading-inc`
+- **User**: `official@atiara.ca`
+- **API Key**: stored in `.env` as `ODOO_API_KEY`, also in `Bigquery/service-account.json` sibling dir
+- **Auth endpoint**: `/xmlrpc/2/common` → `authenticate(db, user, api_key, {})`
+- **Model endpoint**: `/xmlrpc/2/object` → `execute_kw(db, uid, api_key, model, method, args, kwargs)`
+- **Version**: Odoo 19.0
+
+Key Odoo models used:
+- `sale.order`, `sale.order.line` — Sales orders
+- `purchase.order`, `purchase.order.line` — Purchase orders
+- `product.product` — Products (has `active` field, use `context={"active_test": False}`)
+- `res.partner` — Customers/vendors (has `active` field)
+- `x_freight` — Freight shipments (custom model)
+- `account.move` — Invoices/credit notes
+- `account.move.line` — Invoice/credit note lines
+- `x_brand` — Brands (custom model)
+- `product.supplierinfo` — Vendor pricelist (has `delay` field for lead time)
+
+### BigQuery
+
+- **Project**: `odoo-471420`
+- **Dataset**: `odoo_data`
+- **Location**: `northamerica-northeast2`
+- **Service Account**: `n8n-odoo-sync@odoo-471420.iam.gserviceaccount.com`
+- **Credentials file**: `/Users/henryyu/Desktop/AI/Anti-Gravity/Bigquery/service-account.json`
+
+**Tables** (12 total):
+`sale_order`, `sale_order_line`, `purchase_order`, `purchase_order_line`, `product_product`, `res_partner`, `freight_shipment`, `credit_note`, `credit_note_line`, `brand`, `invoice`, `invoice_line`
+
+**Views**:
+- `v_sales` — Denormalized sales view joining sale_order + sale_order_line + product_product + res_partner. Used by all Metabase dashboards. Columns include: `order_date`, `warehouse_name`, `brand`, `category_l1/l2/l3`, `country_of_origin`, `internal_reference`, `barcode_var`, `product_name`, `chinese_name_var`, `partner_name`, `price_subtotal`, `margin`, `cost`, etc.
+- `v_price_analysis` — Promotional pricing analysis view (effective_price, regular_price, is_promotional, promo_discount_pct)
+
+**Schema doc**: `/Users/henryyu/Desktop/AI/Anti-Gravity/Bigquery/bigquery_schema.md`
+
+### Metabase (BI/Analytics)
+
+- **URL**: `https://metabase.atiara.cloud`
+- **Hosted on**: Hostinger VPS
+- **Login**: `official@atiara.ca` / `AtiaraInternal1`
+- **Auth**: `POST /api/session` with `{"username": "...", "password": "..."}` → returns `{"id": "<session-token>"}`
+- **Session header**: `X-Metabase-Session: <token>`
+- **BigQuery database ID**: 2 ("Atiara Bigquery")
+- **Version**: v0.58.7
+
+**Key API endpoints**:
+- `GET /api/card/<id>` — Get card (question) details
+- `PUT /api/card/<id>` — Update card (query, display, visualization_settings)
+- `POST /api/card/<id>/query` — Execute card query, returns `{status, data: {rows, cols}}`
+- `POST /api/card` — Create new card
+- `GET /api/dashboard/<id>` — Get dashboard with dashcards, parameters, parameter_mappings
+- `PUT /api/dashboard/<id>` — Update dashboard layout (dashcards array with row/col/size_x/size_y/parameter_mappings)
+- `POST /api/dashboard/<id>/cards` — Add card to dashboard
+- `DELETE /api/dashboard/<id>/cards` — Remove card from dashboard (body: `{"dashcardId": <id>}`)
+
+**Dashboard template tag pattern** (for native SQL cards on SKU Performance dashboard 6):
+- All filter tags use `type: "text"` (NOT `dimension`)
+- Tag names: `period`, `warehouse`, `brand`, `country`, `cat1`, `cat2`, `cat3`, `internal_ref`, `barcode`, `product_name`, `chinese_name`
+- Period filter: `order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL SAFE_CAST({{period}} AS INT64) DAY)`
+- Text filters: `column = {{tag_name}}`
+- Name filters: `column LIKE CONCAT('%', {{tag_name}}, '%')`
+- Dashboard parameter IDs: `pd`, `wh`, `br`, `co`, `c1`, `c2`, `c3`, `ir`, `bc`, `en`, `cn`
+- Parameter mappings use `["variable", ["template-tag", "<tag_name>"]]` targets (NOT `dimension`)
+
+**Dashboards**:
+- Dashboard 6: "SKU Performance" — product-level metrics, trends, sankey
+- Other dashboards exist in collections under `/api/collection/`
+
+### Windmill (Workflow Automation)
+
+- **Accessed via**: MCP server (`mcp__windmill__*` tools)
+- **Workspace**: default
+
+**Key paths**:
+- `f/bigquery_sync/sync_table` — Single parameterized script syncing any Odoo model to BigQuery (v10, hash `3ef970c7c8d67c20`)
+- `f/bigquery_sync/sync_all` — Flow with 12 parallel branches (one per table)
+- `f/bigquery_sync/hourly_sync` — Schedule: hourly, America/Toronto timezone
+- `f/bigquery_sync/reconcile_deletions` — Hard-delete reconciliation script
+- `f/bigquery_sync/daily_reconciliation` — Schedule: 3 AM ET daily
+
+**Resources**:
+- `f/bigquery_sync/bigquery_credentials` — BigQuery service account JSON
+- `f/po_processor/odoo_credentials` — Odoo API credentials (url, db, user, api_key)
+
+---
+
+## MCP Servers & Tools
+
+### BigQuery MCP (`mcp__bigquery__*`)
+
+| Tool | Purpose |
+|------|---------|
+| `list-tables` | List all tables in a dataset |
+| `describe-table` | Get table schema (columns, types) |
+| `execute-query` | Run SQL queries |
+
+**Caveat**: These tools default to US location, but our dataset is in `northamerica-northeast2`. Use `bq` CLI or Python client as workaround for queries that fail with location errors.
+
+### Windmill MCP (`mcp__windmill__*`)
+
+| Tool | Purpose |
+|------|---------|
+| `listScripts` | List all scripts |
+| `getScriptByPath` | Get script source code |
+| `createScript` | Create new script (fails if path exists — delete first) |
+| `deleteScriptByPath` / `deleteScriptByHash` | Delete script |
+| `runScriptByPath` | Run a script with arguments |
+| `runScriptPreviewAndWaitResult` | Run inline code and wait for result (times out on large syncs) |
+| `listFlows` / `getFlowByPath` | List/get flows |
+| `createFlow` / `updateFlow` / `deleteFlowByPath` | Manage flows |
+| `listSchedules` / `getSchedule` | List/get schedules |
+| `createSchedule` / `updateSchedule` / `deleteSchedule` | Manage schedules |
+| `listResource` / `getResource` | List/get resources |
+| `createResource` / `updateResource` / `deleteResource` | Manage resources |
+| `listVariable` / `getVariable` | List/get variables |
+| `createVariable` / `updateVariable` / `deleteVariable` | Manage variables |
+| `listJobs` / `listQueue` / `listWorkers` | Monitor execution |
+| `queryDocumentation` | Search Windmill docs |
+| `runFlowByPath` | Run a flow |
+| `listResourceType` | List available resource types |
+| Custom flow/script tools (`s-f_*`, `f-f_*`) | Pre-built domain flows (PO processing, Shopify sync, Excel export, PDF extract) |
+
+### Hostinger API MCP (`mcp__hostinger-api__*`)
+
+Manages Hostinger infrastructure (VPS, DNS, domains, hosting, billing).
+
+**VPS tools** (`VPS_*`): Create/manage VMs, firewalls, snapshots, SSH keys, PTR records, projects, post-install scripts, metrics, backups, Monarx security
+**DNS tools** (`DNS_*`): Get/update/reset/validate DNS records, snapshots
+**Domain tools** (`domains_*`): Check availability, purchase, manage WHOIS, forwarding, privacy, nameservers, domain lock
+**Hosting tools** (`hosting_*`): Create websites, deploy JS/static/WordPress, list orders/websites, generate subdomains
+**Billing tools** (`billing_*`): Subscriptions, payment methods, catalog, auto-renewal, service orders
+**Reach tools** (`reach_*`): Contact management, segments, profiles
+
+### Pencil MCP (`mcp__pencil__*`)
+
+Design editor for `.pen` files (encrypted format — must use Pencil tools, not Read/Grep).
+
+| Tool | Purpose |
+|------|---------|
+| `get_editor_state` | Get current editor context |
+| `open_document` | Open/create .pen files |
+| `get_guidelines` | Design guidelines (code, table, tailwind, landing-page) |
+| `get_style_guide_tags` / `get_style_guide` | Style guide discovery |
+| `batch_get` | Search/read nodes in .pen files |
+| `batch_design` | Insert/copy/update/replace/move/delete/image operations |
+| `snapshot_layout` | Check computed layout rectangles |
+| `get_screenshot` | Visual validation screenshot |
+| `get_variables` / `set_variables` | Manage design variables/themes |
+| `find_empty_space_on_canvas` | Find empty canvas space |
+| `search_all_unique_properties` | Search node properties |
+| `replace_all_matching_properties` | Bulk property replacement |
+
+---
+
+## Key File Locations
+
+| File | Location |
+|------|----------|
+| BQ service account | `/Users/henryyu/Desktop/AI/Anti-Gravity/Bigquery/service-account.json` |
+| BQ schema doc | `/Users/henryyu/Desktop/AI/Anti-Gravity/Bigquery/bigquery_schema.md` |
+| BQ full sync script | `/Users/henryyu/Desktop/AI/Anti-Gravity/Bigquery/full_sync.py` |
+| BQ reconciliation | `/Users/henryyu/Desktop/AI/Anti-Gravity/Bigquery/run_reconciliation.py` |
+| Windmill sync script | Deployed at `f/bigquery_sync/sync_table` (source via `getScriptByPath`) |
+| Odoo credentials | `.env` in po-processor-app, also in Windmill resource `f/po_processor/odoo_credentials` |
+| Sankey HTML (standalone) | `/Users/henryyu/Desktop/AI/Anti-Gravity/product_sales_sankey.html` |

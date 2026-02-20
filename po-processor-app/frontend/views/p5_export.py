@@ -94,10 +94,7 @@ def render(settings: dict) -> None:
     order_summaries = st.session_state.get("order_summaries", pd.DataFrame())
 
     if line_details.empty:
-        st.warning("No processed data found. Complete the Transform & Review step first.")
-        if st.button("← Back to Transform & Review"):
-            st.session_state["current_page"] = "Transform & Review"
-            st.rerun()
+        st.warning("No processed data found. Complete the **Transform & Review** tab first.")
         return
 
     client = st.session_state.get("odoo_client")

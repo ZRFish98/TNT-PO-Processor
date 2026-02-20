@@ -58,6 +58,8 @@ section[data-testid="stSidebar"] {
     background: var(--bg-color) !important;
     border-right: 1px solid var(--border-color);
     box-shadow: none;
+    width: 180px !important;
+    min-width: 180px !important;
 }
 
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
