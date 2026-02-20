@@ -8,6 +8,7 @@ immediately reflected (and propagated to the Export page).
 import pandas as pd
 import streamlit as st
 
+from backend.bq_lost_lines import record_lost_lines
 from backend.data_transformer import DataTransformer
 from backend.inventory_optimizer import InventoryOptimizer
 
@@ -515,6 +516,10 @@ def _render_warehouse_tab(warehouse_code: str):
                     st.session_state["line_details"].loc[common_idx, col] = edited_df.loc[common_idx, col].values
             # Drop rows flagged in editor + rows removed inline
             drop_idx = edited_df.loc[edited_df["flagged"] == True].index.union(removed_idx)
+            lost = st.session_state["line_details"].loc[
+                st.session_state["line_details"].index.intersection(drop_idx)
+            ]
+            record_lost_lines(lost, "delete_flagged", warehouse_code)
             st.session_state["line_details"] = st.session_state["line_details"].drop(drop_idx)
             st.rerun()
         else:
@@ -527,6 +532,10 @@ def _render_warehouse_tab(warehouse_code: str):
                 st.session_state["line_details"].loc[common_idx, col] = edited_df.loc[common_idx, col].values
         # Drop rows the user removed inline in the editor
         if not removed_idx.empty:
+            lost = st.session_state["line_details"].loc[
+                st.session_state["line_details"].index.intersection(removed_idx)
+            ]
+            record_lost_lines(lost, "save_removed", warehouse_code)
             st.session_state["line_details"] = st.session_state["line_details"].drop(removed_idx)
         st.success(f"Changes saved for {warehouse_code}.")
         st.rerun()

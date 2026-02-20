@@ -54,6 +54,7 @@ services:
       - GMAIL_CREDENTIALS_PATH=/data/gmail/credentials.json
       - GMAIL_POLL_INTERVAL_SECONDS=300
       - APP_BASE_URL=https://internal.atiara.cloud
+      - GOOGLE_APPLICATION_CREDENTIALS_JSON=${GOOGLE_APPLICATION_CREDENTIALS_JSON}
     volumes:
       - gmail_tokens:/data/gmail
     healthcheck:
