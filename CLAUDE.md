@@ -59,21 +59,29 @@ The main application follows a multi-stage processing pipeline implemented in St
 - `backend/data_transformer.py` - Transforms raw PO data into Odoo-ready format with warehouse routing
 - `backend/inventory_optimizer.py` - Optimizes order allocations based on inventory and sales data
 - `backend/odoo_client.py` - XML-RPC client for Odoo API integration
+- `backend/gmail_monitor.py` - Gmail polling thread for auto-ingesting PO PDFs from email
+- `backend/bq_lost_lines.py` - Non-blocking BigQuery writer for deleted/lost order lines analytics
+
+**Database:**
+- `database/connection.py` - PostgreSQL connection pool, schema init, and migrations for `staged_pos` and `app_settings` tables
 
 **Data Models:**
 - `models/schemas.py` - Pydantic models for data validation (PurchaseOrderLine, ProductVariant, SalesOrder, etc.)
 
 **Configuration:**
 - `config/settings.yaml` - Application settings including warehouse mappings and store names
-- `.env` - API credentials (Odoo API key)
+- `.env` - API credentials (Odoo, Gmail, PostgreSQL, BigQuery)
 
 **Frontend:**
-- `frontend/app.py` - Streamlit UI with 5-page workflow:
-  1. Configuration - Connect to Odoo
-  2. Upload & Extract - Upload PDFs and extract line items
-  3. Transform & Review - Fetch Odoo product data and transform to sales orders
-  4. Inventory Optimization - Run allocation logic and review/edit orders
-  5. Review & Import - Export to Excel for Odoo import
+- `frontend/app.py` - Streamlit multi-page app with navigation (PO Processor, Invoice Verification, Return Processor, Settings)
+- `frontend/style.css` - Atiara brand theme (dark mode, Poppins font, pink primary)
+- `frontend/views/po_processor.py` - Combined PO workflow page with tab navigation:
+  - Dashboard (p2_queue) - PO queue with PDF preview, download tracking, batch ZIP download
+  - Transform & Review (p4_inventory) - Odoo data fetch, inventory optimization, line editing
+  - Export (p5_export) - Excel export with per-store import selection
+- `frontend/views/p1_settings.py` - Settings page (Odoo connection, Gmail OAuth, DB explorer)
+- `frontend/views/invoice_verification.py` - Invoice verification workflow (placeholder)
+- `frontend/views/return_processor.py` - Return processor workflow (placeholder)
 
 ### Windmill Alternative (po-processor-app/f/po_processor/)
 
@@ -169,12 +177,32 @@ When making changes to extraction or transformation logic:
 **Environment Variables (.env):**
 ```
 ODOO_API_KEY=<api_key>
+ODOO_URL=https://atiara-trading-inc.odoo.com
+ODOO_DB=atiara-trading-inc
+ODOO_USERNAME=official@atiara.ca
+DATABASE_URL=postgresql://po_user:password@localhost:5433/po_processor
+GMAIL_CLIENT_ID=<client_id>
+GMAIL_CLIENT_SECRET=<client_secret>
+BQ_SERVICE_ACCOUNT_PATH=/path/to/service-account.json  # local dev
+GOOGLE_APPLICATION_CREDENTIALS_JSON=<base64>            # Docker/production
 ```
 
 **Settings (config/settings.yaml):**
 - Odoo connection defaults (URL and database name)
 - Warehouse-store mappings (`cw_stores` list)
 - Complete store name mappings (`tt_store_names`)
+
+### Deployment
+
+- **Cloud URL**: `https://internal.atiara.cloud`
+- **VPS**: Hostinger VPS ID `1211602` at `72.62.83.239`
+- **Docker image**: `ghcr.io/zrfish98/tnt-po-processor:latest`
+- **CI/CD**: Push to `master` → GitHub Actions builds and pushes Docker image (`.github/workflows/docker-build.yml`)
+- **Compose file (VPS)**: `/docker/po-processor/docker-compose.yml` (copy of `docker-compose.hostinger.yml`)
+- **Deploy steps**: `git push origin master` → wait for CI → SSH to VPS → `docker compose pull && docker compose up -d`
+- **SSH to VPS**: `sshpass -p '<password>' ssh -o PubkeyAuthentication=no root@72.62.83.239`
+- **DB migrations**: Auto-run via `_ensure_schema()` on container restart, or manually via `docker exec po-processor-db psql -U po_user -d po_processor`
+- **Traefik**: Reverse proxy with TLS via Let's Encrypt, on `n8n_default` Docker network
 
 ---
 
@@ -209,8 +237,10 @@ Key Odoo models used:
 - **Service Account**: `n8n-odoo-sync@odoo-471420.iam.gserviceaccount.com`
 - **Credentials file**: `/Users/henryyu/Desktop/AI/Anti-Gravity/Bigquery/service-account.json`
 
-**Tables** (12 total):
-`sale_order`, `sale_order_line`, `purchase_order`, `purchase_order_line`, `product_product`, `res_partner`, `freight_shipment`, `credit_note`, `credit_note_line`, `brand`, `invoice`, `invoice_line`
+**Tables** (13 total):
+`sale_order`, `sale_order_line`, `purchase_order`, `purchase_order_line`, `product_product`, `res_partner`, `freight_shipment`, `credit_note`, `credit_note_line`, `brand`, `invoice`, `invoice_line`, `lost_order_lines`
+
+**`lost_order_lines`** — Tracks order lines deleted during PO processing (out-of-stock items). Written by `backend/bq_lost_lines.py` via streaming insert. Columns: `id` (UUID), `deleted_at`, `deletion_type` ("delete_flagged"|"save_removed"), `warehouse`, `store_id`, `store_name`, `po_number`, `internal_reference`, `product_id`, `product_name`, `barcode`, `original_qty`, `product_uom_qty`, `price_unit`, `total_price`, `odoo_on_hand`, `odoo_available`, `flagged`, `flag_reason`, `shortage_details`.
 
 **Views**:
 - `v_sales` — Denormalized sales view joining sale_order + sale_order_line + product_product + res_partner. Used by all Metabase dashboards. Columns include: `order_date`, `warehouse_name`, `brand`, `category_l1/l2/l3`, `country_of_origin`, `internal_reference`, `barcode_var`, `product_name`, `chinese_name_var`, `partner_name`, `price_subtotal`, `margin`, `cost`, etc.
