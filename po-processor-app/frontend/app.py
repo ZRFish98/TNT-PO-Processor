@@ -196,6 +196,9 @@ if "code" in _qp and os.path.exists(_gmail_creds_path):
         st.error(t("app.oauth_fail", error=_e))
         st.query_params.clear()
 
+# ── Start Gmail Monitor eagerly (so it polls even before Settings is visited) ─
+_gmail_monitor = get_gmail_monitor()
+
 # ── Odoo signal light + language toggle (fixed, top-right) ───────────────────
 _connected = st.session_state["odoo_connected"]
 _clr = "#22c55e" if _connected else "#ef4444"
@@ -303,7 +306,7 @@ _return_page = st.Page(
     url_path="return-processor",
 )
 _settings_page = st.Page(
-    lambda: _p1_settings.render(settings, get_gmail_monitor()),
+    lambda: _p1_settings.render(settings, _gmail_monitor),
     title=t("nav.settings"),
     icon=":material/settings:",
     url_path="settings",
