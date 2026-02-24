@@ -220,10 +220,11 @@ components.html(
 
         var bar = pd.createElement('div');
         bar.id = 'atiara-status-bar';
-        bar.style.cssText = 'position:fixed;top:14px;right:140px;z-index:99999;'
+        bar.style.cssText = 'position:fixed;top:14px;right:140px;z-index:999999 !important;'
             + 'display:flex;align-items:center;gap:10px;'
             + 'background:#111111;padding:4px 10px;'
-            + 'border-radius:6px;border:1px solid #222222;';
+            + 'border-radius:6px;border:1px solid #222222;'
+            + 'pointer-events:auto;';
 
         // Odoo status dot + label
         var dot = pd.createElement('div');
@@ -241,10 +242,20 @@ components.html(
         var toggle = pd.createElement('span');
         toggle.textContent = '{_lang_label}';
         toggle.style.cssText = 'font-size:0.7rem;color:#FF367F;font-family:Poppins,sans-serif;'
-            + 'font-weight:600;cursor:pointer;user-select:none;';
-        toggle.addEventListener('click', function() {{
-            // Direct navigation via location.search (more reliable than createElement)
-            window.parent.location.search = '?set_lang={_lang_target}';
+            + 'font-weight:600;cursor:pointer;user-select:none;pointer-events:auto;';
+        toggle.addEventListener('click', function(e) {{
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Language toggle clicked, navigating to:', '?set_lang={_lang_target}');
+            // Try multiple navigation methods for better compatibility
+            try {{
+                var currentUrl = window.parent.location.href.split('?')[0];
+                window.parent.location.href = currentUrl + '?set_lang={_lang_target}';
+            }} catch(err) {{
+                console.error('Navigation failed:', err);
+                // Fallback: try top window
+                window.top.location.href = window.top.location.href.split('?')[0] + '?set_lang={_lang_target}';
+            }}
         }});
         bar.appendChild(toggle);
 
