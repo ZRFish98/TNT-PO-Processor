@@ -199,71 +199,46 @@ if "code" in _qp and os.path.exists(_gmail_creds_path):
 # ── Start Gmail Monitor eagerly (so it polls even before Settings is visited) ─
 _gmail_monitor = get_gmail_monitor()
 
-# ── Odoo signal light + language toggle (fixed, top-right) ───────────────────
-_connected = st.session_state["odoo_connected"]
-_clr = "#22c55e" if _connected else "#ef4444"
-_dot_lbl = t("app.connected") if _connected else t("app.disconnected")
+# ── Language toggle button (native Streamlit approach) ──────────────────────
 _cur_lang = st.session_state.get("language", "en")
 _lang_label = "\u4e2d\u6587" if _cur_lang == "en" else "EN"
 _lang_target = "zh" if _cur_lang == "en" else "en"
 
-# Inject entire status bar + clickable language toggle into the parent document via JS.
-# st.markdown strips <a> tags and may strip id attributes, so we bypass it entirely.
-components.html(
+# Use st.markdown with HTML/JS to create a clickable language toggle
+# This runs in Streamlit's context, not an iframe, so navigation should work
+st.markdown(
     f"""
-    <script>
-    (function() {{
-        var pd = window.parent.document;
-        // Remove previous instance (Streamlit reruns recreate components)
-        var old = pd.getElementById('atiara-status-bar');
-        if (old) old.remove();
-
-        var bar = pd.createElement('div');
-        bar.id = 'atiara-status-bar';
-        bar.style.cssText = 'position:fixed;top:14px;right:140px;z-index:999999 !important;'
-            + 'display:flex;align-items:center;gap:10px;'
-            + 'background:#111111;padding:4px 10px;'
-            + 'border-radius:6px;border:1px solid #222222;'
-            + 'pointer-events:auto;';
-
-        // Odoo status dot + label
-        var dot = pd.createElement('div');
-        dot.style.cssText = 'display:flex;align-items:center;gap:6px;';
-        dot.innerHTML = '<div style="width:8px;height:8px;border-radius:50%;background:{_clr};"></div>'
-            + '<span style="font-size:0.7rem;color:#737373;font-family:Poppins,sans-serif;font-weight:500;">{_dot_lbl}</span>';
-        bar.appendChild(dot);
-
-        // Divider
-        var divider = pd.createElement('div');
-        divider.style.cssText = 'width:1px;height:14px;background:#333;';
-        bar.appendChild(divider);
-
-        // Language toggle (clickable)
-        var toggle = pd.createElement('span');
-        toggle.textContent = '{_lang_label}';
-        toggle.style.cssText = 'font-size:0.7rem;color:#FF367F;font-family:Poppins,sans-serif;'
-            + 'font-weight:600;cursor:pointer;user-select:none;pointer-events:auto;';
-        toggle.addEventListener('click', function(e) {{
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Language toggle clicked, navigating to:', '?set_lang={_lang_target}');
-            // Try multiple navigation methods for better compatibility
-            try {{
-                var currentUrl = window.parent.location.href.split('?')[0];
-                window.parent.location.href = currentUrl + '?set_lang={_lang_target}';
-            }} catch(err) {{
-                console.error('Navigation failed:', err);
-                // Fallback: try top window
-                window.top.location.href = window.top.location.href.split('?')[0] + '?set_lang={_lang_target}';
-            }}
-        }});
-        bar.appendChild(toggle);
-
-        pd.body.appendChild(bar);
-    }})();
-    </script>
+    <div id="atiara-lang-toggle" style="position:fixed;top:14px;right:70px;z-index:999999;">
+        <a href="?set_lang={_lang_target}"
+           style="font-size:0.7rem;color:#FF367F;font-family:Poppins,sans-serif;
+                  font-weight:600;text-decoration:none;cursor:pointer;
+                  background:#111111;padding:4px 10px;border-radius:6px;
+                  border:1px solid #222222;display:inline-block;">
+            {_lang_label}
+        </a>
+    </div>
     """,
-    height=0,
+    unsafe_allow_html=True,
+)
+
+# ── Odoo connection indicator (fixed, top-right) ──────────────────────────────
+_connected = st.session_state["odoo_connected"]
+_clr = "#22c55e" if _connected else "#ef4444"
+_dot_lbl = t("app.connected") if _connected else t("app.disconnected")
+
+st.markdown(
+    f"""
+    <div style="position:fixed;top:14px;right:140px;z-index:999999;
+                display:flex;align-items:center;gap:6px;
+                background:#111111;padding:4px 10px;border-radius:6px;
+                border:1px solid #222222;">
+        <div style="width:8px;height:8px;border-radius:50%;background:{_clr};"></div>
+        <span style="font-size:0.7rem;color:#737373;font-family:Poppins,sans-serif;font-weight:500;">
+            {_dot_lbl}
+        </span>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 # ── Header ─────────────────────────────────────────────────────────────────────
