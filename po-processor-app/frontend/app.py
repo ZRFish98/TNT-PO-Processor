@@ -243,13 +243,8 @@ components.html(
         toggle.style.cssText = 'font-size:0.7rem;color:#FF367F;font-family:Poppins,sans-serif;'
             + 'font-weight:600;cursor:pointer;user-select:none;';
         toggle.addEventListener('click', function() {{
-            // Use hidden link in parent doc to navigate (bypasses iframe sandbox)
-            var a = pd.createElement('a');
-            a.href = '?set_lang={_lang_target}';
-            a.style.display = 'none';
-            pd.body.appendChild(a);
-            a.click();
-            pd.body.removeChild(a);
+            // Direct navigation via location.search (more reliable than createElement)
+            window.parent.location.search = '?set_lang={_lang_target}';
         }});
         bar.appendChild(toggle);
 
