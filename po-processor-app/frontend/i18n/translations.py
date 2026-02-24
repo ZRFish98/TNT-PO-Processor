@@ -269,9 +269,48 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings.db.deleted": "Deleted {count} records.",
 
         # ── Invoice Verification ──────────────────────────────────────────────
-        "invoice.title": "Receive Invoice Verification",
-        "invoice.coming_soon": "This workflow is coming soon.",
-        "invoice.caption": "Verify received invoices against purchase orders and flag discrepancies.",
+        "invoice.title": "Invoice Verification - Proof of Delivery",
+        "invoice.select_tab": "Select workflow tab",
+        "invoice.tab.upload": "Upload & Split",
+        "invoice.tab.review": "Review & Verify",
+        "invoice.tab.attach": "Attach & Complete",
+
+        # Upload tab
+        "invoice.upload.header": "Upload Signed Invoices",
+        "invoice.upload.instructions": "Upload a scanned PDF containing multiple signed invoices. The app will automatically split them by invoice number.",
+        "invoice.upload.label": "Upload scanned invoices (PDF)",
+        "invoice.upload.success": "Uploaded {name} ({size} KB)",
+        "invoice.upload.btn_split": "🔪 Split Invoices",
+        "invoice.upload.splitting": "Splitting PDF and extracting invoice numbers...",
+        "invoice.upload.split_success": "✅ Split into {count} invoices",
+        "invoice.upload.split_fail": "Failed to split PDF. Check Gemini API key and try again.",
+        "invoice.upload.split_preview": "Split Invoices Preview",
+        "invoice.upload.btn_download": "📥 Download",
+        "invoice.upload.btn_next": "Next: Review & Verify →",
+
+        # Review tab
+        "invoice.review.header": "Review & Verify Against Odoo",
+        "invoice.review.no_data": "No invoices to review. Please upload and split invoices first.",
+        "invoice.review.not_connected": "Odoo not connected. Please connect in Settings.",
+        "invoice.review.instructions": "Click Validate to check each invoice against Odoo sales orders.",
+        "invoice.review.btn_validate": "✓ Validate All Invoices",
+        "invoice.review.validating": "Validating invoices against Odoo...",
+        "invoice.review.errors_found": "Validation errors found:",
+        "invoice.review.btn_next": "Next: Attach & Complete →",
+
+        # Attach tab
+        "invoice.attach.header": "Attach to Odoo Sales Orders",
+        "invoice.attach.no_data": "No invoices to attach. Please upload and split invoices first.",
+        "invoice.attach.not_connected": "Odoo not connected. Please connect in Settings.",
+        "invoice.attach.not_validated": "Invoices not validated. Please run validation first.",
+        "invoice.attach.instructions": "Attach signed invoice PDFs to corresponding sales orders as proof of delivery.",
+        "invoice.attach.valid_count": "Valid Invoices",
+        "invoice.attach.btn_attach": "📎 Attach All to Odoo",
+        "invoice.attach.attaching": "Attaching invoices to Odoo...",
+        "invoice.attach.success": "✅ Invoices attached successfully!",
+
+        # Errors
+        "invoice.error_no_gemini_key": "GEMINI_API_KEY not configured. Set it in environment variables.",
 
         # ── Return Processor ──────────────────────────────────────────────────
         "returns.title": "Return Processor",
@@ -641,9 +680,48 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings.db.deleted": "\u5df2\u5220\u9664 {count} \u6761\u8bb0\u5f55\u3002",
 
         # ── Invoice Verification ──────────────────────────────────────────────
-        "invoice.title": "\u53d1\u7968\u6838\u5b9e",
-        "invoice.coming_soon": "\u6b64\u529f\u80fd\u5373\u5c06\u4e0a\u7ebf\u3002",
-        "invoice.caption": "\u5c06\u6536\u5230\u7684\u53d1\u7968\u4e0e\u91c7\u8d2d\u8ba2\u5355\u8fdb\u884c\u6838\u5bf9\u5e76\u6807\u8bb0\u5dee\u5f02\u3002",
+        "invoice.title": "发票核实 - 交付证明",
+        "invoice.select_tab": "选择工作流选项卡",
+        "invoice.tab.upload": "上传 & 拆分",
+        "invoice.tab.review": "审核 & 校验",
+        "invoice.tab.attach": "附加 & 完成",
+
+        # Upload tab
+        "invoice.upload.header": "上传已签署发票",
+        "invoice.upload.instructions": "上传包含多张已签发票的扫描PDF。应用程序将按发票号自动拆分。",
+        "invoice.upload.label": "上传扫描发票 (PDF)",
+        "invoice.upload.success": "已上传 {name} ({size} KB)",
+        "invoice.upload.btn_split": "🔪 拆分发票",
+        "invoice.upload.splitting": "正在拆分PDF并提取发票号...",
+        "invoice.upload.split_success": "✅ 已拆分为 {count} 张发票",
+        "invoice.upload.split_fail": "拆分PDF失败。请检查Gemini API密钥后重试。",
+        "invoice.upload.split_preview": "拆分发票预览",
+        "invoice.upload.btn_download": "📥 下载",
+        "invoice.upload.btn_next": "下一步：审核 & 校验 →",
+
+        # Review tab
+        "invoice.review.header": "对比 Odoo 审核 & 校验",
+        "invoice.review.no_data": "无发票可审核。请先上传并拆分发票。",
+        "invoice.review.not_connected": "Odoo 未连接。请在设置中连接。",
+        "invoice.review.instructions": "点击校验以检查每张发票与 Odoo 销售订单的对比。",
+        "invoice.review.btn_validate": "✓ 校验所有发票",
+        "invoice.review.validating": "正在对比 Odoo 校验发票...",
+        "invoice.review.errors_found": "发现校验错误：",
+        "invoice.review.btn_next": "下一步：附加 & 完成 →",
+
+        # Attach tab
+        "invoice.attach.header": "附加到 Odoo 销售订单",
+        "invoice.attach.no_data": "无发票可附加。请先上传并拆分发票。",
+        "invoice.attach.not_connected": "Odoo 未连接。请在设置中连接。",
+        "invoice.attach.not_validated": "发票未校验。请先运行校验。",
+        "invoice.attach.instructions": "将已签发票PDF附加到对应的销售订单作为交付证明。",
+        "invoice.attach.valid_count": "有效发票",
+        "invoice.attach.btn_attach": "📎 全部附加到 Odoo",
+        "invoice.attach.attaching": "正在将发票附加到 Odoo...",
+        "invoice.attach.success": "✅ 发票已成功附加！",
+
+        # Errors
+        "invoice.error_no_gemini_key": "GEMINI_API_KEY 未配置。请在环境变量中设置。",
 
         # ── Return Processor ──────────────────────────────────────────────────
         "returns.title": "\u9000\u8d27\u5904\u7406",
