@@ -67,6 +67,37 @@ class SalesOrder(BaseModel):
     client_order_ref: str  # PO Number
 
 
+class ReturnLineItem(BaseModel):
+    """A single line item from a T&T return form."""
+    item_id: Optional[str] = None          # Internal reference from return form
+    upc: Optional[str] = None              # T&T UPC (12-digit format)
+    description_en: Optional[str] = None
+    description_cn: Optional[str] = None
+    size_pack: Optional[str] = None
+    item_class: Optional[str] = None
+    quantity: float = 0                    # Qty on return form (PDF)
+    cost: float = 0
+    amount: float = 0
+    reason: Optional[str] = None
+
+    # Populated after Odoo matching
+    odoo_product_id: Optional[int] = None
+    odoo_product_name: Optional[str] = None
+    odoo_barcode: Optional[str] = None     # EAN-13 from Odoo
+    matched: bool = False
+
+
+class ReturnFormPage(BaseModel):
+    """High-level summary of one return form page."""
+    page_number: int
+    store_name: Optional[str] = None
+    doc_no: Optional[str] = None           # e.g. "EF0216367539"
+    print_date: Optional[str] = None
+    line_items: List[ReturnLineItem] = []
+    total_amount: float = 0
+    extraction_confidence: Optional[float] = None  # 0-1 from Gemini
+
+
 class StagedPO(BaseModel):
     """A PO record stored in the PostgreSQL staging queue."""
     id: Optional[int] = None

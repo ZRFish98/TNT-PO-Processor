@@ -4,8 +4,10 @@ from typing import Dict
 
 import streamlit as st
 
+from frontend.i18n import t
+
 
 def render(settings: Dict) -> None:
-    st.title("Receive Invoice Verification")
-    st.info("This workflow is coming soon.")
-    st.caption("Verify received invoices against purchase orders and flag discrepancies.")
+    st.title(t("invoice.title"))
+    st.info(t("invoice.coming_soon"))
+    st.caption(t("invoice.caption"))

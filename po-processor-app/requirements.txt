@@ -22,3 +22,10 @@ google-cloud-bigquery>=3.20.0
 
 # Auto-refresh for queue page
 streamlit-autorefresh>=1.0.1
+
+# Gemini AI (return form OCR) — uses new google-genai SDK
+google-genai>=1.0.0
+
+# PDF splitting and page rendering
+pypdf>=4.0.0
+pdf2image>=1.17.0

@@ -8,6 +8,7 @@ os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import yaml
 from dotenv import load_dotenv
 
@@ -18,6 +19,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from backend.odoo_client import OdooClient
 from backend.gmail_monitor import GmailMonitor
 from database.connection import get_db_connection
+from frontend.i18n import t
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -125,11 +127,23 @@ _DEFAULTS = {
     "line_details": pd.DataFrame(),
     "transform_errors": [],
     # Export (SO ref + open orders are managed locally in p5_export.py)
+    # Return Processor
+    "return_uploaded_pdf": None,
+    "return_page_pdfs": [],        # list[bytes] — per-page PDFs
+    "return_extracted": [],        # list[dict]  — Gemini OCR results
+    "return_summaries": pd.DataFrame(),
+    "return_details": pd.DataFrame(),
+    "return_extraction_errors": [],
+    "return_unmatched": [],
 }
 
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# ── Language default ─────────────────────────────────────────────────────────
+if "language" not in st.session_state:
+    st.session_state["language"] = "en"
 
 # ── Auto-connect Odoo on first load ───────────────────────────────────────────
 if not st.session_state["odoo_connected"]:
@@ -148,10 +162,18 @@ if not st.session_state["odoo_connected"]:
         except Exception:
             pass  # Will show as disconnected; user can reconnect from Settings
 
+# ── Language switch via query param ───────────────────────────────────────────
+_qp = st.query_params
+if "set_lang" in _qp:
+    _new_lang = _qp["set_lang"]
+    if _new_lang in ("en", "zh"):
+        st.session_state["language"] = _new_lang
+    del st.query_params["set_lang"]
+    st.rerun()
+
 # ── OAuth callback handler ─────────────────────────────────────────────────────
 # Google redirects back with ?code=... which may land in a NEW Streamlit session
 # (the Flow object from session state is gone). Recreate it from credentials.json.
-_qp = st.query_params
 if "code" in _qp and os.path.exists(_gmail_creds_path):
     try:
         from google_auth_oauthlib.flow import Flow as _OAuthFlow
@@ -168,34 +190,75 @@ if "code" in _qp and os.path.exists(_gmail_creds_path):
         st.session_state["gmail_auth_url"] = None
         st.query_params.clear()
         _monitor.start()
-        st.success("Gmail authorized and monitoring started!")
+        st.success(t("app.oauth_success"))
         st.rerun()
     except Exception as _e:
-        st.error(f"OAuth callback failed: {_e}")
+        st.error(t("app.oauth_fail", error=_e))
         st.query_params.clear()
 
-# ── Odoo signal light (fixed, top-right) ──────────────────────────────────────
+# ── Odoo signal light + language toggle (fixed, top-right) ───────────────────
 _connected = st.session_state["odoo_connected"]
 _clr = "#22c55e" if _connected else "#ef4444"
-_dot_lbl = "Connected" if _connected else "Disconnected"
-st.markdown(
+_dot_lbl = t("app.connected") if _connected else t("app.disconnected")
+_cur_lang = st.session_state.get("language", "en")
+_lang_label = "\u4e2d\u6587" if _cur_lang == "en" else "EN"
+_lang_target = "zh" if _cur_lang == "en" else "en"
+
+# Inject entire status bar + clickable language toggle into the parent document via JS.
+# st.markdown strips <a> tags and may strip id attributes, so we bypass it entirely.
+components.html(
     f"""
-    <div style="position:fixed; top:14px; right:140px; z-index:9999;
-                display:flex; align-items:center; gap:6px;
-                background:#111111; padding:4px 10px;
-                border-radius:6px; border:1px solid #222222;">
-        <div style="width:8px; height:8px; border-radius:50%;
-                    background:{_clr};"></div>
-        <span style="font-size:0.7rem; color:#737373;
-                     font-family:'Poppins',sans-serif;
-                     font-weight:500;">{_dot_lbl}</span>
-    </div>
+    <script>
+    (function() {{
+        var pd = window.parent.document;
+        // Remove previous instance (Streamlit reruns recreate components)
+        var old = pd.getElementById('atiara-status-bar');
+        if (old) old.remove();
+
+        var bar = pd.createElement('div');
+        bar.id = 'atiara-status-bar';
+        bar.style.cssText = 'position:fixed;top:14px;right:140px;z-index:99999;'
+            + 'display:flex;align-items:center;gap:10px;'
+            + 'background:#111111;padding:4px 10px;'
+            + 'border-radius:6px;border:1px solid #222222;';
+
+        // Odoo status dot + label
+        var dot = pd.createElement('div');
+        dot.style.cssText = 'display:flex;align-items:center;gap:6px;';
+        dot.innerHTML = '<div style="width:8px;height:8px;border-radius:50%;background:{_clr};"></div>'
+            + '<span style="font-size:0.7rem;color:#737373;font-family:Poppins,sans-serif;font-weight:500;">{_dot_lbl}</span>';
+        bar.appendChild(dot);
+
+        // Divider
+        var divider = pd.createElement('div');
+        divider.style.cssText = 'width:1px;height:14px;background:#333;';
+        bar.appendChild(divider);
+
+        // Language toggle (clickable)
+        var toggle = pd.createElement('span');
+        toggle.textContent = '{_lang_label}';
+        toggle.style.cssText = 'font-size:0.7rem;color:#FF367F;font-family:Poppins,sans-serif;'
+            + 'font-weight:600;cursor:pointer;user-select:none;';
+        toggle.addEventListener('click', function() {{
+            // Use hidden link in parent doc to navigate (bypasses iframe sandbox)
+            var a = pd.createElement('a');
+            a.href = '?set_lang={_lang_target}';
+            a.style.display = 'none';
+            pd.body.appendChild(a);
+            a.click();
+            pd.body.removeChild(a);
+        }});
+        bar.appendChild(toggle);
+
+        pd.body.appendChild(bar);
+    }})();
+    </script>
     """,
-    unsafe_allow_html=True,
+    height=0,
 )
 
 # ── Header ─────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:0.75rem;">
         <div style="width:36px; height:36px; border-radius:50%;
                     background:#FF367F; display:flex; align-items:center;
@@ -205,11 +268,11 @@ st.markdown("""
             <h1 style="margin:0; line-height:1; font-size:1.2rem !important;
                        font-family:'Poppins',sans-serif; font-weight:600;
                        color:#ededed; -webkit-text-fill-color:#ededed;">
-                Atiara Internal Tool</h1>
+                {t('app.title')}</h1>
             <p style="color:#737373; font-size:0.68rem; margin:0;
                       font-family:'Poppins',sans-serif; letter-spacing:2px;
                       text-transform:uppercase;">
-                Atiara Trading Inc.</p>
+                {t('app.subtitle')}</p>
         </div>
     </div>
 """, unsafe_allow_html=True)
@@ -222,32 +285,32 @@ import frontend.views.p1_settings as _p1_settings
 
 _po_page = st.Page(
     lambda: _po_processor.render(settings),
-    title="T&T PO Processor",
+    title=t("nav.po_processor"),
     icon=":material/shopping_cart:",
     url_path="po-processor",
     default=True,
 )
 _invoice_page = st.Page(
     lambda: _invoice_verification.render(settings),
-    title="Invoice Verification",
+    title=t("nav.invoice_verification"),
     icon=":material/receipt_long:",
     url_path="invoice-verification",
 )
 _return_page = st.Page(
     lambda: _return_processor.render(settings),
-    title="Return Processor",
+    title=t("nav.return_processor"),
     icon=":material/undo:",
     url_path="return-processor",
 )
 _settings_page = st.Page(
     lambda: _p1_settings.render(settings, get_gmail_monitor()),
-    title="Settings",
+    title=t("nav.settings"),
     icon=":material/settings:",
     url_path="settings",
 )
 
 pg = st.navigation({
-    "Workflows": [_po_page, _invoice_page, _return_page],
+    t("nav.workflows"): [_po_page, _invoice_page, _return_page],
     "": [_settings_page],
 })
 pg.run()

@@ -11,6 +11,7 @@ import streamlit as st
 from backend.bq_lost_lines import record_lost_lines
 from backend.data_transformer import DataTransformer
 from backend.inventory_optimizer import InventoryOptimizer
+from frontend.i18n import t
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ def _compute_live_summaries(settings: dict) -> pd.DataFrame:
 
     for store_id in sorted(active["store_id"].unique()):
         group = active[active["store_id"] == store_id]
-        wh = group["warehouse"].iloc[0] if "warehouse" in group.columns else "—"
+        wh = group["warehouse"].iloc[0] if "warehouse" in group.columns else "\u2014"
         store_name = group["store_name"].iloc[0] if "store_name" in group.columns else ""
         official_name = tt_names.get(int(store_id), f"Store {store_id}")
 
@@ -72,28 +73,25 @@ def _compute_live_summaries(settings: dict) -> pd.DataFrame:
 # ── main render ─────────────────────────────────────────────────────────────────
 
 def render(settings: dict):
-    st.title("Transform & Review")
+    st.title(t("transform.title"))
 
     # ── No line_details yet → show transform controls ─────────────────────────
     if st.session_state["line_details"].empty:
         if st.session_state["extracted_po_data"].empty:
-            st.warning("No PO data loaded. Go to the Dashboard tab and select POs to process.")
+            st.warning(t("transform.no_data"))
             return
 
         client = st.session_state.get("odoo_client")
 
-        st.subheader("Fetch Odoo Data & Transform")
-        st.caption(
-            "This will match each PO line against Odoo products, convert quantities "
-            "from cases to units, and group by store."
-        )
+        st.subheader(t("transform.fetch.title"))
+        st.caption(t("transform.fetch.caption"))
 
-        if st.button("Fetch Odoo Data & Transform", type="primary"):
+        if st.button(t("transform.fetch.btn"), type="primary"):
             if not client:
-                st.error("Connect to Odoo first (Settings page).")
+                st.error(t("transform.fetch.no_odoo"))
                 return
 
-            with st.spinner("Fetching product data from Odoo..."):
+            with st.spinner(t("transform.fetch.spinner_products")):
                 refs = (
                     st.session_state["extracted_po_data"]["Internal Reference"]
                     .unique()
@@ -103,7 +101,7 @@ def render(settings: dict):
                 products = client.get_products(internal_references=refs)
                 st.session_state["odoo_products_cache"] = products
 
-            with st.spinner("Transforming PO data..."):
+            with st.spinner(t("transform.fetch.spinner_transform")):
                 _run_transform(settings)
 
             st.rerun()
@@ -124,19 +122,16 @@ def render(settings: dict):
     live_summaries = _compute_live_summaries(settings)
     st.session_state["order_summaries"] = live_summaries  # keep Export in sync
 
-    st.subheader("Order Summaries")
+    st.subheader(t("transform.summaries.title"))
     if live_summaries.empty:
-        st.warning(
-            "All order lines have been flagged or removed — nothing to export. "
-            "Un-flag items or clear & start over."
-        )
+        st.warning(t("transform.summaries.empty"))
     else:
         # Metrics row
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Stores", len(live_summaries))
-        m2.metric("POs", int(live_summaries["po_count"].sum()))
-        m3.metric("Active Lines", int(live_summaries["total_lines"].sum()))
-        m4.metric("Total Value", f"${live_summaries['total_value'].sum():,.2f}")
+        m1.metric(t("transform.metric.stores"), len(live_summaries))
+        m2.metric(t("transform.metric.pos"), int(live_summaries["po_count"].sum()))
+        m3.metric(t("transform.metric.lines"), int(live_summaries["total_lines"].sum()))
+        m4.metric(t("transform.metric.value"), f"${live_summaries['total_value'].sum():,.2f}")
 
         disp_summary = live_summaries[[
             "store_id", "official_name", "warehouse", "po_count",
@@ -144,17 +139,19 @@ def render(settings: dict):
             "total_lines", "total_value",
         ]].copy()
         disp_summary.columns = [
-            "Store", "Customer", "WH", "POs",
-            "PO Numbers", "Order Date", "Delivery Date",
-            "Lines", "Value",
+            t("transform.col.store"), t("transform.col.customer"),
+            t("transform.col.wh"), t("transform.col.pos"),
+            t("transform.col.po_numbers"), t("transform.col.order_date"),
+            t("transform.col.delivery_date"), t("transform.col.lines"),
+            t("transform.col.value"),
         ]
         st.dataframe(
             disp_summary,
             column_config={
-                "Store": st.column_config.NumberColumn(format="%d", width="small"),
-                "Value": st.column_config.NumberColumn(format="$%.2f"),
-                "Lines": st.column_config.NumberColumn(format="%d", width="small"),
-                "POs": st.column_config.NumberColumn(format="%d", width="small"),
+                t("transform.col.store"): st.column_config.NumberColumn(format="%d", width="small"),
+                t("transform.col.value"): st.column_config.NumberColumn(format="$%.2f"),
+                t("transform.col.lines"): st.column_config.NumberColumn(format="%d", width="small"),
+                t("transform.col.pos"): st.column_config.NumberColumn(format="%d", width="small"),
             },
             hide_index=True,
             use_container_width=True,
@@ -172,10 +169,11 @@ def render(settings: dict):
         missing_skus = pdf_skus - odoo_skus
 
         if missing_skus:
-            st.subheader("Unmatched SKUs")
+            st.subheader(t("transform.unmatched.title"))
             st.warning(
-                f"**{len(missing_skus)} SKU(s) from the PDF could not be found in Odoo:** "
-                + ", ".join(sorted(missing_skus))
+                t("transform.unmatched.warning",
+                  count=len(missing_skus),
+                  skus=", ".join(sorted(missing_skus)))
             )
 
             # Build table of all affected PO lines
@@ -185,14 +183,22 @@ def render(settings: dict):
             unmatched_disp = unmatched_lines[[
                 "Store Name", "Store ID", "Internal Reference", "Description", "PO No.",
             ]].copy()
-            unmatched_disp.columns = ["Store Name", "Store ID", "SKU", "Product Name", "PO #"]
-            unmatched_disp = unmatched_disp.sort_values(["SKU", "Store ID"]).reset_index(drop=True)
+            unmatched_disp.columns = [
+                t("transform.unmatched.col.store_name"),
+                t("transform.unmatched.col.store_id"),
+                t("transform.unmatched.col.sku"),
+                t("transform.unmatched.col.product_name"),
+                t("transform.unmatched.col.po"),
+            ]
+            unmatched_disp = unmatched_disp.sort_values(
+                [t("transform.unmatched.col.sku"), t("transform.unmatched.col.store_id")]
+            ).reset_index(drop=True)
 
             st.dataframe(
                 unmatched_disp,
                 column_config={
-                    "Store ID": st.column_config.NumberColumn(format="%d", width="small"),
-                    "PO #": st.column_config.NumberColumn(format="%d", width="small"),
+                    t("transform.unmatched.col.store_id"): st.column_config.NumberColumn(format="%d", width="small"),
+                    t("transform.unmatched.col.po"): st.column_config.NumberColumn(format="%d", width="small"),
                 },
                 hide_index=True,
                 use_container_width=True,
@@ -216,18 +222,17 @@ def render(settings: dict):
                     zero_upo["default_code"].astype(str).isin(active_skus)
                 ]
                 if not zero_upo_active.empty:
-                    st.subheader("Units Per Order = 0")
-                    st.warning(
-                        f"**{len(zero_upo_active)} product(s) have `Units Per Order` "
-                        f"(x_studio_tt_om_int) = 0 in Odoo.** "
-                        "Quantity and price calculations default to 1 unit per order "
-                        "when this field is 0 — results may be incorrect. "
-                        "Please update these products in Odoo."
-                    )
+                    st.subheader(t("transform.zero_upo.title"))
+                    st.warning(t("transform.zero_upo.warning", count=len(zero_upo_active)))
                     upo_disp = zero_upo_active[[
                         "default_code", "name", "barcode", "x_studio_tt_om_int",
                     ]].copy()
-                    upo_disp.columns = ["SKU", "Product Name", "Barcode", "Units Per Order"]
+                    upo_disp.columns = [
+                        t("transform.zero_upo.col.sku"),
+                        t("transform.zero_upo.col.product_name"),
+                        t("transform.zero_upo.col.barcode"),
+                        t("transform.zero_upo.col.upo"),
+                    ]
                     st.dataframe(
                         upo_disp,
                         hide_index=True,
@@ -236,7 +241,7 @@ def render(settings: dict):
 
     # Transform logs
     if st.session_state.get("transform_errors"):
-        with st.expander(f"Transform Logs ({len(st.session_state['transform_errors'])} messages)"):
+        with st.expander(t("transform.logs.title", count=len(st.session_state["transform_errors"]))):
             for log in st.session_state["transform_errors"]:
                 st.write(log)
 
@@ -247,11 +252,11 @@ def render(settings: dict):
     btn1, btn2, btn3, btn4 = st.columns(4)
 
     with btn1:
-        if st.button("Refresh Odoo Data"):
+        if st.button(t("transform.btn.refresh")):
             if not client:
-                st.error("Connect to Odoo first.")
+                st.error(t("transform.btn.refresh_no_odoo"))
             else:
-                with st.spinner("Re-fetching products from Odoo..."):
+                with st.spinner(t("transform.spinner.refetch")):
                     refs = (
                         st.session_state["extracted_po_data"]["Internal Reference"]
                         .unique()
@@ -260,21 +265,21 @@ def render(settings: dict):
                     )
                     products = client.get_products(internal_references=refs)
                     st.session_state["odoo_products_cache"] = products
-                with st.spinner("Re-transforming..."):
+                with st.spinner(t("transform.spinner.retransform")):
                     _run_transform(settings)
                 st.rerun()
 
     with btn2:
-        if st.button("Re-transform"):
+        if st.button(t("transform.btn.retransform")):
             if not st.session_state.get("odoo_products_cache"):
-                st.error("No cached Odoo data. Click 'Refresh Odoo Data' first.")
+                st.error(t("transform.btn.retransform_no_cache"))
             else:
-                with st.spinner("Re-transforming..."):
+                with st.spinner(t("transform.spinner.retransform")):
                     _run_transform(settings)
                 st.rerun()
 
     with btn3:
-        if st.button("Clear & Start Over"):
+        if st.button(t("transform.btn.clear")):
             st.session_state["order_summaries"] = pd.DataFrame()
             st.session_state["line_details"] = pd.DataFrame()
             st.session_state["odoo_products_cache"] = None
@@ -285,7 +290,7 @@ def render(settings: dict):
             st.rerun()
 
     with btn4:
-        if st.button("Run Optimization Engine", type="primary"):
+        if st.button(t("transform.btn.optimize"), type="primary"):
             transformer = DataTransformer(settings)
             optimizer = InventoryOptimizer(transformer)
             optimized, logs = optimizer.optimize_allocations(
@@ -294,12 +299,12 @@ def render(settings: dict):
                 pd.DataFrame(),   # store_inventory  (no Supabase)
             )
             st.session_state["line_details"] = optimized
-            st.success("Optimization complete.")
+            st.success(t("transform.msg.optimized"))
             st.rerun()
 
     # ── Product Allocation Summary ────────────────────────────────────────────
-    st.subheader("Product Allocation Summary")
-    st.caption("Products where total demand exceeds available inventory (and available > 0).")
+    st.subheader(t("transform.allocation.title"))
+    st.caption(t("transform.allocation.caption"))
 
     if not st.session_state["line_details"].empty:
         summary_data = []
@@ -341,27 +346,37 @@ def render(settings: dict):
                     "warehouse", "product_image", "internal_reference",
                     "product_name", "product_uom_qty", "odoo_available", "shortage",
                 ]].copy()
-                disp.columns = ["Warehouse", "Image", "SKU", "Product", "Demand", "Available", "Shortage"]
+                disp.columns = [
+                    t("transform.allocation.col.warehouse"),
+                    t("transform.allocation.col.image"),
+                    t("transform.allocation.col.sku"),
+                    t("transform.allocation.col.product"),
+                    t("transform.allocation.col.demand"),
+                    t("transform.allocation.col.available"),
+                    t("transform.allocation.col.shortage"),
+                ]
                 st.dataframe(
                     disp,
                     column_config={
-                        "Image": st.column_config.ImageColumn("Image", width="small"),
-                        "Demand": st.column_config.NumberColumn(format="%d"),
-                        "Available": st.column_config.NumberColumn(format="%d"),
-                        "Shortage": st.column_config.NumberColumn(format="%d"),
+                        t("transform.allocation.col.image"): st.column_config.ImageColumn(
+                            t("transform.allocation.col.image"), width="small"
+                        ),
+                        t("transform.allocation.col.demand"): st.column_config.NumberColumn(format="%d"),
+                        t("transform.allocation.col.available"): st.column_config.NumberColumn(format="%d"),
+                        t("transform.allocation.col.shortage"): st.column_config.NumberColumn(format="%d"),
                     },
                     hide_index=True,
                     use_container_width=True,
                 )
-                st.warning(f"{len(allocation_needed)} product(s) need allocation decisions.")
+                st.warning(t("transform.allocation.warning", count=len(allocation_needed)))
             else:
-                st.success("All products have sufficient inventory.")
+                st.success(t("transform.allocation.ok"))
 
     st.divider()
 
     # ── Warehouse tabs ─────────────────────────────────────────────────────────
-    st.subheader("Review & Edit Allocations")
-    tab_ce, tab_cw = st.tabs(["Canada East (CE)", "Canada West (CW)"])
+    st.subheader(t("transform.review.title"))
+    tab_ce, tab_cw = st.tabs([t("transform.tab.ce"), t("transform.tab.cw")])
 
     with tab_ce:
         _render_warehouse_tab("CE")
@@ -370,8 +385,8 @@ def render(settings: dict):
         _render_warehouse_tab("CW")
 
     st.divider()
-    if st.button("Next: Export →", type="primary"):
-        st.session_state["po_active_tab"] = "Export"
+    if st.button(t("transform.btn.next_export"), type="primary"):
+        st.session_state["po_active_tab"] = "export"
         st.rerun()
 
 
@@ -381,7 +396,7 @@ def _render_warehouse_tab(warehouse_code: str):
     ].copy()
 
     if df.empty:
-        st.info(f"No orders for {warehouse_code}.")
+        st.info(t("transform.wh.empty", warehouse=warehouse_code))
         return
 
     editable_cols = ["price_unit", "product_uom_qty", "flagged"]
@@ -393,13 +408,13 @@ def _render_warehouse_tab(warehouse_code: str):
     ]
 
     # ── Filters ────────────────────────────────────────────────────────────────
-    st.markdown("### Filters")
+    st.markdown(t("transform.filter.title"))
 
     # Row 1: SKU, Barcode, Product Name
     f1, f2, f3 = st.columns([2, 2, 2])
     with f1:
         selected_refs = st.multiselect(
-            "Filter by SKU",
+            t("transform.filter.sku"),
             options=sorted(df["internal_reference"].unique().tolist()),
             default=[],
             key=f"filter_ref_{warehouse_code}",
@@ -409,14 +424,14 @@ def _render_warehouse_tab(warehouse_code: str):
             [str(b) for b in df["barcode"].dropna().unique() if b]
         )
         selected_barcodes = st.multiselect(
-            "Filter by Barcode",
+            t("transform.filter.barcode"),
             options=barcode_options,
             default=[],
             key=f"filter_barcode_{warehouse_code}",
         )
     with f3:
         product_name_search = st.text_input(
-            "Filter by Product Name (contains)",
+            t("transform.filter.product_name"),
             value="",
             key=f"filter_product_name_{warehouse_code}",
         )
@@ -424,33 +439,40 @@ def _render_warehouse_tab(warehouse_code: str):
     # Row 2: Flagged Status, Flag Reason, action buttons
     f4, f5, f6, f7, f8 = st.columns([1.2, 1.2, 1, 1.3, 1.3])
     with f4:
+        flag_options = [
+            t("transform.filter.flagged.all"),
+            t("transform.filter.flagged.yes"),
+            t("transform.filter.flagged.no"),
+        ]
         flag_filter = st.selectbox(
-            "Flagged Status",
-            ["All", "Flagged Only", "Not Flagged"],
+            t("transform.filter.flagged"),
+            flag_options,
             key=f"filter_flag_{warehouse_code}",
         )
     with f5:
-        reasons = ["All"] + sorted(
+        reasons = [t("transform.filter.reason.all")] + sorted(
             [str(r) for r in df["flag_reason"].dropna().unique() if r]
         )
-        reason_filter = st.selectbox("Flag Reason", reasons, key=f"filter_reason_{warehouse_code}")
+        reason_filter = st.selectbox(
+            t("transform.filter.reason"), reasons, key=f"filter_reason_{warehouse_code}"
+        )
     with f6:
         st.write("")
         st.write("")
-        if st.button("Clear Filters", key=f"clear_filters_{warehouse_code}"):
+        if st.button(t("transform.btn.clear_filters"), key=f"clear_filters_{warehouse_code}"):
             st.rerun()
     with f7:
         st.write("")
         st.write("")
         delete_flagged_clicked = st.button(
-            "Delete Flagged",
+            t("transform.btn.delete_flagged"),
             key=f"delete_flagged_{warehouse_code}",
         )
     with f8:
         st.write("")
         st.write("")
         save_clicked = st.button(
-            f"Save Changes ({warehouse_code})",
+            t("transform.btn.save", warehouse=warehouse_code),
             key=f"save_{warehouse_code}",
             type="primary",
         )
@@ -466,15 +488,15 @@ def _render_warehouse_tab(warehouse_code: str):
             product_name_search.strip(), case=False, na=False
         )
         filtered_df = filtered_df[mask]
-    if flag_filter == "Flagged Only":
+    if flag_filter == t("transform.filter.flagged.yes"):
         filtered_df = filtered_df[filtered_df["flagged"] == True]
-    elif flag_filter == "Not Flagged":
+    elif flag_filter == t("transform.filter.flagged.no"):
         filtered_df = filtered_df[filtered_df["flagged"] == False]
-    if reason_filter != "All":
+    if reason_filter != t("transform.filter.reason.all"):
         filtered_df = filtered_df[filtered_df["flag_reason"] == reason_filter]
 
     if len(filtered_df) < len(df):
-        st.info(f"Showing {len(filtered_df)} of {len(df)} items.")
+        st.info(t("transform.filter.showing", filtered=len(filtered_df), total=len(df)))
 
     display_df = filtered_df[[c for c in full_cols if c in filtered_df.columns]].copy()
     if "product_image" in display_df.columns:
@@ -491,10 +513,10 @@ def _render_warehouse_tab(warehouse_code: str):
         num_rows="dynamic",
         height=800,
         column_config={
-            "product_image": st.column_config.ImageColumn("Image", width="small"),
-            "product_uom_qty": st.column_config.NumberColumn("Qty", min_value=0, step=1),
-            "price_unit": st.column_config.NumberColumn("Price", min_value=0.01, format="$%.2f"),
-            "flagged": st.column_config.CheckboxColumn("Flagged?"),
+            "product_image": st.column_config.ImageColumn(t("transform.col.image"), width="small"),
+            "product_uom_qty": st.column_config.NumberColumn(t("transform.col.qty"), min_value=0, step=1),
+            "price_unit": st.column_config.NumberColumn(t("transform.col.price"), min_value=0.01, format="$%.2f"),
+            "flagged": st.column_config.CheckboxColumn(t("transform.col.flagged")),
         },
         disabled=[c for c in display_df.columns if c not in editable_cols],
         hide_index=True,
@@ -523,7 +545,7 @@ def _render_warehouse_tab(warehouse_code: str):
             st.session_state["line_details"] = st.session_state["line_details"].drop(drop_idx)
             st.rerun()
         else:
-            st.warning("No flagged items to delete.")
+            st.warning(t("transform.msg.no_flagged"))
 
     if save_clicked:
         # Write editable values back for rows still present
@@ -537,5 +559,5 @@ def _render_warehouse_tab(warehouse_code: str):
             ]
             record_lost_lines(lost, "save_removed", warehouse_code)
             st.session_state["line_details"] = st.session_state["line_details"].drop(removed_idx)
-        st.success(f"Changes saved for {warehouse_code}.")
+        st.success(t("transform.msg.saved", warehouse=warehouse_code))
         st.rerun()

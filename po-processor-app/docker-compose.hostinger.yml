@@ -55,6 +55,7 @@ services:
       - GMAIL_POLL_INTERVAL_SECONDS=300
       - APP_BASE_URL=https://internal.atiara.cloud
       - GOOGLE_APPLICATION_CREDENTIALS_JSON=${GOOGLE_APPLICATION_CREDENTIALS_JSON}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     volumes:
       - gmail_tokens:/data/gmail
     healthcheck:

@@ -1,3 +1,4 @@
+import base64
 import re
 import xmlrpc.client
 import ssl
@@ -408,3 +409,309 @@ class OdooClient:
             )
 
         return created_ids, failed_lines
+
+    # ── Credit Note (Return) Methods ──────────────────────────────────────────
+
+    def get_products_by_barcode(self, barcodes: List[str]) -> List[Dict[str, Any]]:
+        """Search product.product by a list of barcodes."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            products = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'product.product', 'search_read',
+                [[['barcode', 'in', barcodes]]],
+                {'fields': ['id', 'name', 'barcode', 'default_code']}
+            )
+            logger.info(f"Found {len(products)} products by barcode")
+            return products
+        except Exception as e:
+            logger.error(f"Error fetching products by barcode: {e}")
+            return []
+
+    def get_credit_notes_by_ref(self, refs: List[str]) -> List[Dict[str, Any]]:
+        """Search account.move (credit notes) by ref values to detect duplicates."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            domain = [
+                ['move_type', '=', 'out_refund'],
+                ['ref', 'in', refs],
+            ]
+            results = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'account.move', 'search_read',
+                [domain],
+                {'fields': ['id', 'name', 'ref', 'state', 'partner_id', 'invoice_date']}
+            )
+            logger.info(f"Found {len(results)} existing credit notes for {len(refs)} ref(s)")
+            return results
+        except Exception as e:
+            logger.error(f"Error checking credit notes by ref: {e}")
+            return []
+
+    def create_credit_note(
+        self,
+        partner_id: int,
+        date: Optional[str] = None,
+        ref: Optional[str] = None,
+        lines: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[Optional[int], Optional[str]]:
+        """Create an account.move with move_type='out_refund' (credit note).
+
+        Each line dict should contain:
+            product_id: int
+            quantity: float
+            price_unit: float
+            name: str (description)
+
+        Returns (move_id, move_name) or (None, None) on failure.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            vals: Dict[str, Any] = {
+                'move_type': 'out_refund',
+                'partner_id': partner_id,
+            }
+            if date:
+                vals['invoice_date'] = date
+            if ref:
+                vals['ref'] = ref
+
+            if lines:
+                vals['invoice_line_ids'] = [
+                    (0, 0, {
+                        'product_id': ln['product_id'],
+                        'quantity': ln['quantity'],
+                        'price_unit': ln['price_unit'],
+                        'name': ln.get('name', ''),
+                    })
+                    for ln in lines
+                ]
+
+            move_id = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'account.move', 'create',
+                [vals]
+            )
+
+            move_data = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'account.move', 'read',
+                [[move_id]],
+                {'fields': ['name']}
+            )
+            move_name = move_data[0]['name'] if move_data else str(move_id)
+
+            logger.info(f"Created credit note {move_name} (ID: {move_id})")
+            return move_id, move_name
+
+        except Exception as e:
+            logger.error(f"Error creating credit note: {e}")
+            return None, None
+
+    def attach_pdf_to_record(
+        self,
+        res_model: str,
+        res_id: int,
+        filename: str,
+        pdf_bytes: bytes,
+    ) -> Optional[int]:
+        """Create an ir.attachment linked to a record with base64-encoded PDF."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            attachment_id = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'ir.attachment', 'create',
+                [{
+                    'name': filename,
+                    'type': 'binary',
+                    'datas': base64.b64encode(pdf_bytes).decode('ascii'),
+                    'res_model': res_model,
+                    'res_id': res_id,
+                    'mimetype': 'application/pdf',
+                }]
+            )
+            logger.info(f"Attached {filename} to {res_model}/{res_id} (attachment ID: {attachment_id})")
+            return attachment_id
+        except Exception as e:
+            logger.error(f"Error attaching PDF to {res_model}/{res_id}: {e}")
+            return None
+
+    def post_chatter_message(
+        self,
+        res_model: str,
+        res_id: int,
+        body: str,
+        attachment_ids: Optional[List[int]] = None,
+    ) -> bool:
+        """Post a message to the chatter (mail.thread) of a record."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            kwargs: Dict[str, Any] = {
+                'body': body,
+                'message_type': 'comment',
+                'subtype_xmlid': 'mail.mt_note',
+            }
+            if attachment_ids:
+                kwargs['attachment_ids'] = attachment_ids
+
+            self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                res_model, 'message_post',
+                [res_id],
+                kwargs,
+            )
+            logger.info(f"Posted chatter message on {res_model}/{res_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error posting chatter message on {res_model}/{res_id}: {e}")
+            return False
+
+    def get_credit_note_name(self, move_id: int) -> Optional[str]:
+        """Read the name (sequence) of a credit note after it has been posted."""
+        if not self.connected:
+            return None
+        try:
+            data = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'account.move', 'read',
+                [[move_id]],
+                {'fields': ['name']}
+            )
+            return data[0]['name'] if data and data[0].get('name') else None
+        except Exception:
+            return None
+
+    def confirm_credit_note(self, move_id: int) -> bool:
+        """Confirm (post) a draft credit note via action_post."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'account.move', 'action_post',
+                [[move_id]]
+            )
+            logger.info(f"Confirmed credit note {move_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error confirming credit note {move_id}: {e}")
+            return False
+
+    def create_return_transfer(self, move_id: int, action_id: int = 1443) -> bool:
+        """Run the [AT] Create Return Transfer server action on a credit note."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'ir.actions.server', 'run',
+                [[action_id]],
+                {'context': {
+                    'active_model': 'account.move',
+                    'active_id': move_id,
+                    'active_ids': [move_id],
+                }}
+            )
+            logger.info(f"Created return transfer for credit note {move_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error creating return transfer for credit note {move_id}: {e}")
+            return False
+
+    def validate_return_transfer(self, move_id: int) -> Tuple[bool, str]:
+        """Find and validate the return transfer(s) linked to a credit note.
+
+        Reads x_studio_return_picking_ids from the credit note, sets done
+        quantities on stock moves, then calls button_validate on each picking.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            move_data = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'account.move', 'read',
+                [[move_id]],
+                {'fields': ['x_studio_return_picking_ids']}
+            )
+            if not move_data:
+                return False, "Credit note not found"
+
+            picking_ids = move_data[0].get('x_studio_return_picking_ids', [])
+            if not picking_ids:
+                return False, "No return transfers found on credit note"
+
+            validated = 0
+            for picking_id in picking_ids:
+                # Read stock moves on this picking
+                picking_data = self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    'stock.picking', 'read',
+                    [[picking_id]],
+                    {'fields': ['move_ids', 'state']}
+                )
+                if not picking_data or picking_data[0].get('state') == 'done':
+                    validated += 1
+                    continue
+
+                # Set done quantity = demand on each stock move
+                stock_move_ids = picking_data[0].get('move_ids', [])
+                if stock_move_ids:
+                    moves = self.models.execute_kw(
+                        self.db, self.uid, self.api_key,
+                        'stock.move', 'read',
+                        [stock_move_ids],
+                        {'fields': ['product_uom_qty', 'quantity']}
+                    )
+                    for mv in moves:
+                        demand = mv.get('product_uom_qty', 0)
+                        if demand > 0:
+                            self.models.execute_kw(
+                                self.db, self.uid, self.api_key,
+                                'stock.move', 'write',
+                                [[mv['id']], {'quantity': demand}]
+                            )
+
+                # Validate the picking
+                result = self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    'stock.picking', 'button_validate',
+                    [[picking_id]]
+                )
+
+                # Handle immediate transfer wizard if returned
+                if isinstance(result, dict) and result.get('res_model'):
+                    wizard_model = result['res_model']
+                    wizard_ctx = result.get('context', {})
+                    wizard_id = self.models.execute_kw(
+                        self.db, self.uid, self.api_key,
+                        wizard_model, 'create',
+                        [{}],
+                        {'context': wizard_ctx}
+                    )
+                    self.models.execute_kw(
+                        self.db, self.uid, self.api_key,
+                        wizard_model, 'process',
+                        [[wizard_id]],
+                        {'context': wizard_ctx}
+                    )
+
+                validated += 1
+
+            logger.info(f"Validated {validated} return transfer(s) for credit note {move_id}")
+            return True, f"{validated} transfer(s)"
+        except Exception as e:
+            logger.error(f"Error validating return transfer for credit note {move_id}: {e}")
+            return False, str(e)
