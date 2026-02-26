@@ -237,74 +237,58 @@ def render(settings: dict) -> None:
             "Action": default_action,
         })
 
-    summary_df = pd.DataFrame(rows)
+    # Per-store layout with individual Action selectboxes
+    col_widths = [0.4, 2.2, 1.2, 0.5, 1.5, 1.5, 0.5, 0.8]
+    header_labels = [
+        t("export.col.import"), t("export.col.action"),
+        t("export.col.latest_so"), t("export.col.store_id"),
+        t("export.col.store_name"), t("export.col.po_numbers"),
+        t("export.col.lines"), t("export.col.value"),
+    ]
+    hdr = st.columns(col_widths)
+    for col, label in zip(hdr, header_labels):
+        col.markdown(f"**{label}**")
 
-    # Use data_editor for per-store action + import selection
-    display_df = summary_df[[
-        "Import", "Action", "latest_undelivered_so",
-        "store_id", "store_name", "po_numbers",
-        "order_date", "delivery_date", "total_lines", "total_value",
-        "po_count", "latest_so_po_ref",
-    ]].copy()
-
-    # Build per-row action options for the selectbox column
-    all_action_options = set()
-    for r in rows:
-        all_action_options.update(r["_action_options"])
-    all_action_options_list = sorted(all_action_options)
-
-    edited = st.data_editor(
-        display_df,
-        key="export_summary_editor",
-        num_rows="fixed",
-        height=min(400, 60 + 35 * len(display_df)),
-        column_config={
-            "Import": st.column_config.CheckboxColumn(t("export.col.import"), width="small"),
-            "Action": st.column_config.SelectboxColumn(
-                t("export.col.action"),
-                options=all_action_options_list,
-                width="medium",
-                required=True,
-            ),
-            "latest_undelivered_so": st.column_config.TextColumn(t("export.col.latest_so")),
-            "store_id": st.column_config.NumberColumn(t("export.col.store_id"), width="small"),
-            "store_name": st.column_config.TextColumn(t("export.col.store_name")),
-            "po_numbers": st.column_config.TextColumn(t("export.col.po_numbers")),
-            "order_date": st.column_config.TextColumn(t("export.col.order_date"), width="small"),
-            "delivery_date": st.column_config.TextColumn(t("export.col.delivery_date"), width="small"),
-            "total_lines": st.column_config.NumberColumn(t("export.col.lines"), width="small"),
-            "total_value": st.column_config.NumberColumn(t("export.col.value"), format="$%.2f", width="small"),
-            "po_count": st.column_config.NumberColumn(t("export.col.pos"), width="small"),
-            "latest_so_po_ref": st.column_config.TextColumn(t("export.col.existing_ref")),
-        },
-        disabled=[c for c in display_df.columns if c not in ("Action", "Import")],
-        hide_index=True,
-        use_container_width=True,
-    )
-
-    # Parse user selections — only include rows where Import is checked
     create_new_stores = []
     append_stores = []
     create_new_label = t("export.action.create_new")
 
-    for idx, erow in edited.iterrows():
-        if not erow.get("Import", True):
-            continue  # skip unchecked stores
+    for idx, row_data in enumerate(rows):
+        cols = st.columns(col_widths)
+        with cols[0]:
+            import_checked = st.checkbox(
+                "import",
+                value=True,
+                key=f"export_import_{row_data['store_id']}",
+                label_visibility="collapsed",
+            )
+        with cols[1]:
+            action = st.selectbox(
+                "action",
+                options=row_data["_action_options"],
+                key=f"export_action_{row_data['store_id']}",
+                label_visibility="collapsed",
+            )
+        cols[2].markdown(row_data["latest_undelivered_so"])
+        cols[3].markdown(str(int(row_data["store_id"])))
+        cols[4].markdown(row_data["store_name"])
+        cols[5].markdown(str(row_data["po_numbers"]))
+        cols[6].markdown(str(row_data["total_lines"]))
+        cols[7].markdown(f"${row_data['total_value']:,.2f}")
 
-        action = erow["Action"]
-        sid = int(summary_df.loc[idx, "store_id"])
-        open_so_id = summary_df.loc[idx, "_open_so_id"]
+        if not import_checked:
+            continue
 
+        sid = int(row_data["store_id"])
         if action == create_new_label:
             create_new_stores.append(sid)
-        elif open_so_id:
-            # Any non-"Create New" action with an open SO means append
+        elif row_data["_open_so_id"]:
             append_stores.append({
                 "store_id": sid,
-                "so_id": int(open_so_id),
-                "so_name": str(summary_df.loc[idx, "latest_undelivered_so"]),
-                "existing_po_ref": str(summary_df.loc[idx, "latest_so_po_ref"] or ""),
-                "new_po_numbers": str(summary_df.loc[idx, "po_numbers"]),
+                "so_id": int(row_data["_open_so_id"]),
+                "so_name": row_data["latest_undelivered_so"],
+                "existing_po_ref": str(row_data.get("latest_so_po_ref", "") or ""),
+                "new_po_numbers": str(row_data.get("po_numbers", "")),
             })
 
     # Show predicted SO refs for Create New stores
@@ -421,15 +405,26 @@ def render(settings: dict) -> None:
                         all_success = False
                         continue
 
-                # Add lines to the newly created SO
-                lines_payload = store_lines[
-                    ["product_id", "product_uom_qty", "price_unit"]
-                ].to_dict(orient="records")
+                # Add lines grouped by PO number with section headers
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                all_created_ids: list[int] = []
+                all_failed_lines: list[dict] = []
 
-                with st.spinner(t("export.spinner.adding", count=len(lines_payload), so_name=so_name)):
-                    created_ids, failed_lines = client.append_lines_to_order(
-                        so_id, lines_payload
-                    )
+                with st.spinner(t("export.spinner.adding", count=len(store_lines), so_name=so_name)):
+                    for po_num in sorted(store_lines["po_number"].unique()):
+                        po_lines = store_lines[store_lines["po_number"] == po_num]
+                        section_text = f"PO {po_num} — {now_str}"
+                        client.create_section_line(so_id, section_text)
+
+                        payload = po_lines[
+                            ["product_id", "product_uom_qty", "price_unit"]
+                        ].to_dict(orient="records")
+                        ids, fails = client.append_lines_to_order(so_id, payload)
+                        all_created_ids.extend(ids)
+                        all_failed_lines.extend(fails)
+
+                created_ids = all_created_ids
+                failed_lines = all_failed_lines
 
                 if created_ids:
                     st.caption(t("export.msg.lines_added", count=len(created_ids), so_name=so_name))
@@ -448,14 +443,27 @@ def render(settings: dict) -> None:
                 store_lines = line_details[
                     (line_details["store_id"] == sid) & (~line_details["flagged"])
                 ]
-                lines_payload = store_lines[
-                    ["product_id", "product_uom_qty", "price_unit"]
-                ].to_dict(orient="records")
 
-                with st.spinner(t("export.spinner.appending", count=len(lines_payload), so_name=so_name)):
-                    created_ids, failed_lines = client.append_lines_to_order(
-                        so_id, lines_payload
-                    )
+                # Add lines grouped by PO number with section headers
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                all_created_ids: list[int] = []
+                all_failed_lines: list[dict] = []
+
+                with st.spinner(t("export.spinner.appending", count=len(store_lines), so_name=so_name)):
+                    for po_num in sorted(store_lines["po_number"].unique()):
+                        po_lines = store_lines[store_lines["po_number"] == po_num]
+                        section_text = f"Add-on 加单 — PO {po_num} — {now_str}"
+                        client.create_section_line(so_id, section_text)
+
+                        payload = po_lines[
+                            ["product_id", "product_uom_qty", "price_unit"]
+                        ].to_dict(orient="records")
+                        ids, fails = client.append_lines_to_order(so_id, payload)
+                        all_created_ids.extend(ids)
+                        all_failed_lines.extend(fails)
+
+                created_ids = all_created_ids
+                failed_lines = all_failed_lines
 
                 if created_ids:
                     st.success(t("export.msg.appended", count=len(created_ids), so_name=so_name))

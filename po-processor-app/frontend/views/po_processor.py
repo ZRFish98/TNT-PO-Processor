@@ -29,10 +29,13 @@ def render(settings: Dict) -> None:
     current_key = st.session_state["po_active_tab"]
     current_label = _key_to_label.get(current_key, _tab_labels[0])
 
+    # Sync radio widget when tab was changed programmatically
+    if st.session_state.pop("_po_tab_changed", False):
+        st.session_state["_po_tab_radio"] = current_label
+
     active_label = st.radio(
         t("po.workflow_step"),
         _tab_labels,
-        index=_tab_labels.index(current_label) if current_label in _tab_labels else 0,
         horizontal=True,
         key="_po_tab_radio",
         label_visibility="collapsed",

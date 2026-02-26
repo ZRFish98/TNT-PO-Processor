@@ -370,6 +370,23 @@ class OdooClient:
             logger.error(f"Error updating client_order_ref on SO {so_id}: {e}")
             return False
 
+    def create_section_line(self, order_id: int, name: str) -> Optional[int]:
+        """Create a section header line on a sale.order (display_type='line_section')."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            line_id = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'sale.order.line', 'create',
+                [{'order_id': order_id, 'display_type': 'line_section', 'name': name}]
+            )
+            logger.info(f"Created section line on SO {order_id}: {name}")
+            return line_id
+        except Exception as e:
+            logger.error(f"Error creating section line on SO {order_id}: {e}")
+            return None
+
     def append_lines_to_order(
         self, so_id: int, lines: List[Dict[str, Any]]
     ) -> Tuple[List[int], List[Dict[str, Any]]]:

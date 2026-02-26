@@ -387,6 +387,7 @@ def render(settings: dict):
     st.divider()
     if st.button(t("transform.btn.next_export"), type="primary"):
         st.session_state["po_active_tab"] = "export"
+        st.session_state["_po_tab_changed"] = True
         st.rerun()
 
 

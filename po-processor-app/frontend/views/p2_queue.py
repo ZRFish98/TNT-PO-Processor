@@ -359,6 +359,7 @@ def render(settings: dict):
                         for _k in ("export_latest_so", "export_so_fetched", "export_open_orders"):
                             st.session_state.pop(_k, None)
                         st.session_state["po_active_tab"] = "transform"
+                        st.session_state["_po_tab_changed"] = True
                         st.rerun()
 
             with stat_col:
