@@ -445,12 +445,15 @@ def _render_attach() -> None:
         with col_status:
             st.caption(_order_state_label(odoo.get("state", "")))
         with col_delivery:
-            # Delivery steps inline
+            # Delivery steps inline (with shortage indicator)
             parts = []
             for p in pickings:
                 icon = _state_icon(p.get("state", ""))
                 label = _picking_step_label(p)
-                parts.append(f"{icon}{label}")
+                if p.get("has_shortages"):
+                    parts.append(f"\u26a0\ufe0f{label}")
+                else:
+                    parts.append(f"{icon}{label}")
             st.caption(" → ".join(parts) if parts else "—")
 
         if checked:
@@ -519,6 +522,26 @@ def _render_order_attach_detail(ref: str, order: dict, odoo: dict) -> None:
             state = _state_label(picking.get("state", ""))
             date_done = picking.get("date_done") or "—"
             st.markdown(f"  {icon} **{label}** — {picking.get('name', '')} — {state} — {date_done}")
+
+            # Show shortage warnings for pending pickings
+            if picking.get("has_shortages") and picking.get("state") not in ("done", "cancel"):
+                shortage_lines = [
+                    m for m in picking.get("move_details", [])
+                    if m.get("forecast_availability", 0) < m.get("product_uom_qty", 0)
+                ]
+                st.warning(t("invoice.attach.shortage_warning", count=len(shortage_lines), picking=picking.get("name", "")))
+                shortage_rows = []
+                for m in shortage_lines:
+                    product = m.get("product_id")
+                    product_name = product[1] if isinstance(product, (list, tuple)) else str(product)
+                    shortage_rows.append({
+                        t("invoice.attach.col_product"): product_name,
+                        t("invoice.attach.col_demand"): m.get("product_uom_qty", 0),
+                        t("invoice.attach.col_available"): m.get("forecast_availability", 0),
+                        t("invoice.attach.col_short"): m.get("product_uom_qty", 0) - m.get("forecast_availability", 0),
+                    })
+                if shortage_rows:
+                    st.dataframe(pd.DataFrame(shortage_rows), use_container_width=True, hide_index=True)
 
 
 def _attach_pdfs_to_odoo(

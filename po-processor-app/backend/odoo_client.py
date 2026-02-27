@@ -762,7 +762,7 @@ class OdooClient:
             return None
 
     def get_delivery_pickings(self, picking_ids: List[int]) -> List[Dict[str, Any]]:
-        """Read stock.picking records with delivery step details."""
+        """Read stock.picking records with delivery step details and move-level availability."""
         if not self.connected:
             raise ConnectionError("Not connected to Odoo")
 
@@ -779,6 +779,33 @@ class OdooClient:
                     'scheduled_date', 'date_done', 'move_ids', 'origin',
                 ]}
             )
+
+            # Fetch move-level availability for each picking
+            for picking in pickings:
+                move_ids = picking.get('move_ids', [])
+                if move_ids and picking.get('state') not in ('done', 'cancel'):
+                    moves = self.models.execute_kw(
+                        self.db, self.uid, self.api_key,
+                        'stock.move', 'read',
+                        [move_ids],
+                        {'fields': [
+                            'product_id', 'product_uom_qty', 'quantity',
+                            'forecast_availability',
+                        ]}
+                    )
+                    picking['move_details'] = moves
+                    # Flag shortages where forecast < demand
+                    shortages = [
+                        m for m in moves
+                        if m.get('forecast_availability', 0) < m.get('product_uom_qty', 0)
+                    ]
+                    picking['has_shortages'] = len(shortages) > 0
+                    picking['shortage_count'] = len(shortages)
+                else:
+                    picking['move_details'] = []
+                    picking['has_shortages'] = False
+                    picking['shortage_count'] = 0
+
             logger.info(f"Fetched {len(pickings)} delivery picking(s)")
             return pickings
         except Exception as e:
@@ -788,7 +815,10 @@ class OdooClient:
     def validate_delivery_picking(self, picking_id: int) -> Tuple[bool, str]:
         """Validate a single delivery picking (set done qty = demand, then confirm).
 
-        Follows the same pattern as validate_return_transfer but for outbound deliveries.
+        Forces quantity = demand on all moves, then validates. If Odoo returns a
+        backorder confirmation wizard (stock availability < demand), it calls
+        process_cancel_backorder to skip backorder creation — the signed invoice
+        confirms all quantities were physically delivered.
         """
         if not self.connected:
             raise ConnectionError("Not connected to Odoo")
@@ -835,7 +865,7 @@ class OdooClient:
                 [[picking_id]]
             )
 
-            # Handle immediate transfer wizard if returned
+            # Handle wizard if returned
             if isinstance(result, dict) and result.get('res_model'):
                 wizard_model = result['res_model']
                 wizard_ctx = result.get('context', {})
@@ -845,12 +875,24 @@ class OdooClient:
                     [{}],
                     {'context': wizard_ctx}
                 )
-                self.models.execute_kw(
-                    self.db, self.uid, self.api_key,
-                    wizard_model, 'process',
-                    [[wizard_id]],
-                    {'context': wizard_ctx}
-                )
+
+                if wizard_model == 'stock.backorder.confirmation':
+                    # No backorder — invoice confirms all qty delivered
+                    self.models.execute_kw(
+                        self.db, self.uid, self.api_key,
+                        wizard_model, 'process_cancel_backorder',
+                        [[wizard_id]],
+                        {'context': wizard_ctx}
+                    )
+                    logger.info(f"Validated {picking['name']} (no backorder)")
+                else:
+                    # Immediate transfer or other wizard
+                    self.models.execute_kw(
+                        self.db, self.uid, self.api_key,
+                        wizard_model, 'process',
+                        [[wizard_id]],
+                        {'context': wizard_ctx}
+                    )
 
             logger.info(f"Validated delivery picking {picking['name']}")
             return True, picking['name']

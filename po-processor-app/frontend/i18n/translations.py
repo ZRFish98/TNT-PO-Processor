@@ -360,6 +360,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "invoice.attach.no_pickings": "{ref}: No delivery transfers to validate.",
         "invoice.attach.validating_one": "Validating deliveries for {ref}...",
         "invoice.attach.validate_done": "Validation complete: {ok} step(s) validated, {fail} failed.",
+        "invoice.attach.shortage_warning": "\u26a0\ufe0f {picking}: {count} product(s) have insufficient stock (Demand > Available). Quantities will be forced to match demand — no backorder will be created.",
+        "invoice.attach.col_product": "Product",
+        "invoice.attach.col_demand": "Demand",
+        "invoice.attach.col_available": "Available",
+        "invoice.attach.col_short": "Short",
 
         # Viewer
         "invoice.viewer.page_select": "Select page",
@@ -826,6 +831,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "invoice.attach.no_pickings": "{ref}\uff1a\u65e0\u4ea4\u4ed8\u8f6c\u79fb\u53ef\u9a8c\u8bc1\u3002",
         "invoice.attach.validating_one": "\u6b63\u5728\u9a8c\u8bc1 {ref} \u7684\u4ea4\u4ed8...",
         "invoice.attach.validate_done": "\u9a8c\u8bc1\u5b8c\u6210\uff1a{ok} \u4e2a\u6b65\u9aa4\u5df2\u9a8c\u8bc1\uff0c{fail} \u4e2a\u5931\u8d25\u3002",
+        "invoice.attach.shortage_warning": "\u26a0\ufe0f {picking}\uff1a{count} \u4e2a\u4ea7\u54c1\u5e93\u5b58\u4e0d\u8db3\uff08\u9700\u6c42 > \u53ef\u7528\uff09\u3002\u6570\u91cf\u5c06\u5f3a\u5236\u5339\u914d\u9700\u6c42\u2014\u2014\u4e0d\u4f1a\u521b\u5efa\u6b20\u5355\u3002",
+        "invoice.attach.col_product": "\u4ea7\u54c1",
+        "invoice.attach.col_demand": "\u9700\u6c42",
+        "invoice.attach.col_available": "\u53ef\u7528",
+        "invoice.attach.col_short": "\u7f3a\u5c11",
 
         # Viewer
         "invoice.viewer.page_select": "\u9009\u62e9\u9875\u9762",
