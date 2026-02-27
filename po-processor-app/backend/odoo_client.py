@@ -92,7 +92,7 @@ class OdooClient:
             logger.error(f"Error fetching products: {e}")
             return []
 
-    def create_sales_order(self, customer_id: int, warehouse_id: int = None, date_order: str = None, client_order_ref: str = None) -> int:
+    def create_sales_order(self, customer_id: int, warehouse_id: int = None, date_order: str = None, client_order_ref: str = None) -> Tuple[int, str]:
         """Create a Sales Order header"""
         if not self.connected:
             raise ConnectionError("Not connected to Odoo")
@@ -731,4 +731,129 @@ class OdooClient:
             return True, f"{validated} transfer(s)"
         except Exception as e:
             logger.error(f"Error validating return transfer for credit note {move_id}: {e}")
+            return False, str(e)
+
+    # ── Invoice Verification / Delivery Methods ──────────────────────────────
+
+    def get_order_with_delivery_details(self, so_name: str) -> Optional[Dict[str, Any]]:
+        """Fetch a sales order by name with delivery-relevant fields."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            orders = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'sale.order', 'search_read',
+                [[['name', '=', so_name]]],
+                {'fields': [
+                    'name', 'amount_total', 'state', 'delivery_status',
+                    'partner_id', 'warehouse_id', 'picking_ids',
+                    'x_studio_delivery_date', 'date_order',
+                    'payment_term_id', 'invoice_ids',
+                ], 'limit': 1}
+            )
+            if not orders:
+                logger.warning(f"Sales order not found: {so_name}")
+                return None
+            logger.info(f"Fetched delivery details for {so_name}")
+            return orders[0]
+        except Exception as e:
+            logger.error(f"Error fetching delivery details for {so_name}: {e}")
+            return None
+
+    def get_delivery_pickings(self, picking_ids: List[int]) -> List[Dict[str, Any]]:
+        """Read stock.picking records with delivery step details."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        if not picking_ids:
+            return []
+
+        try:
+            pickings = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'stock.picking', 'read',
+                [picking_ids],
+                {'fields': [
+                    'name', 'state', 'picking_type_id', 'picking_type_code',
+                    'scheduled_date', 'date_done', 'move_ids', 'origin',
+                ]}
+            )
+            logger.info(f"Fetched {len(pickings)} delivery picking(s)")
+            return pickings
+        except Exception as e:
+            logger.error(f"Error fetching delivery pickings: {e}")
+            return []
+
+    def validate_delivery_picking(self, picking_id: int) -> Tuple[bool, str]:
+        """Validate a single delivery picking (set done qty = demand, then confirm).
+
+        Follows the same pattern as validate_return_transfer but for outbound deliveries.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            picking_data = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'stock.picking', 'read',
+                [[picking_id]],
+                {'fields': ['name', 'move_ids', 'state']}
+            )
+            if not picking_data:
+                return False, "Picking not found"
+
+            picking = picking_data[0]
+            if picking.get('state') == 'done':
+                return True, f"{picking['name']} already done"
+
+            if picking.get('state') == 'cancel':
+                return False, f"{picking['name']} is cancelled"
+
+            # Set done quantity = demand on each stock move
+            stock_move_ids = picking.get('move_ids', [])
+            if stock_move_ids:
+                moves = self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    'stock.move', 'read',
+                    [stock_move_ids],
+                    {'fields': ['product_uom_qty', 'quantity']}
+                )
+                for mv in moves:
+                    demand = mv.get('product_uom_qty', 0)
+                    if demand > 0:
+                        self.models.execute_kw(
+                            self.db, self.uid, self.api_key,
+                            'stock.move', 'write',
+                            [[mv['id']], {'quantity': demand}]
+                        )
+
+            # Validate the picking
+            result = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                'stock.picking', 'button_validate',
+                [[picking_id]]
+            )
+
+            # Handle immediate transfer wizard if returned
+            if isinstance(result, dict) and result.get('res_model'):
+                wizard_model = result['res_model']
+                wizard_ctx = result.get('context', {})
+                wizard_id = self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    wizard_model, 'create',
+                    [{}],
+                    {'context': wizard_ctx}
+                )
+                self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    wizard_model, 'process',
+                    [[wizard_id]],
+                    {'context': wizard_ctx}
+                )
+
+            logger.info(f"Validated delivery picking {picking['name']}")
+            return True, picking['name']
+        except Exception as e:
+            logger.error(f"Error validating delivery picking {picking_id}: {e}")
             return False, str(e)
