@@ -34,6 +34,23 @@ def _to_odoo_date(raw: str) -> str:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
+def _add_promo_unit_price(df: pd.DataFrame) -> pd.DataFrame:
+    """Add promo_unit_price column: price_unit for promotional lines, None otherwise.
+
+    Uses object dtype to preserve None (avoid pandas NaN coercion).
+    """
+    df = df.copy()
+    if "is_promotional" in df.columns:
+        df["promo_unit_price"] = df.apply(
+            lambda r: r["price_unit"] if r.get("is_promotional") is True else None,
+            axis=1,
+        ).astype(object)
+    else:
+        df["promo_unit_price"] = None
+    return df
+
+
 def _to_excel(summaries: pd.DataFrame, lines: pd.DataFrame) -> bytes:
     """Generate Odoo import Excel for 'Create New' stores only."""
     output = io.BytesIO()
@@ -410,14 +427,18 @@ def render(settings: dict) -> None:
                 all_created_ids: list[int] = []
                 all_failed_lines: list[dict] = []
 
+                store_lines = _add_promo_unit_price(store_lines)
+
                 with st.spinner(t("export.spinner.adding", count=len(store_lines), so_name=so_name)):
                     for po_num in sorted(store_lines["po_number"].unique()):
                         po_lines = store_lines[store_lines["po_number"] == po_num]
-                        section_text = f"PO {po_num} — {now_str}"
+                        po_is_promo = po_lines["is_promotional"].fillna(False).any() if "is_promotional" in po_lines.columns else False
+                        promo_tag = " [PROMO]" if po_is_promo else ""
+                        section_text = f"PO {po_num}{promo_tag} — {now_str}"
                         client.create_section_line(so_id, section_text)
 
                         payload = po_lines[
-                            ["product_id", "product_uom_qty", "price_unit"]
+                            ["product_id", "product_uom_qty", "price_unit", "promo_unit_price"]
                         ].to_dict(orient="records")
                         ids, fails = client.append_lines_to_order(so_id, payload)
                         all_created_ids.extend(ids)
@@ -444,6 +465,8 @@ def render(settings: dict) -> None:
                     (line_details["store_id"] == sid) & (~line_details["flagged"])
                 ]
 
+                store_lines = _add_promo_unit_price(store_lines)
+
                 # Add lines grouped by PO number with section headers
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
                 all_created_ids: list[int] = []
@@ -452,11 +475,13 @@ def render(settings: dict) -> None:
                 with st.spinner(t("export.spinner.appending", count=len(store_lines), so_name=so_name)):
                     for po_num in sorted(store_lines["po_number"].unique()):
                         po_lines = store_lines[store_lines["po_number"] == po_num]
-                        section_text = f"Add-on 加单 — PO {po_num} — {now_str}"
+                        po_is_promo = po_lines["is_promotional"].fillna(False).any() if "is_promotional" in po_lines.columns else False
+                        promo_tag = " [PROMO]" if po_is_promo else ""
+                        section_text = f"Add-on 加单 — PO {po_num}{promo_tag} — {now_str}"
                         client.create_section_line(so_id, section_text)
 
                         payload = po_lines[
-                            ["product_id", "product_uom_qty", "price_unit"]
+                            ["product_id", "product_uom_qty", "price_unit", "promo_unit_price"]
                         ].to_dict(orient="records")
                         ids, fails = client.append_lines_to_order(so_id, payload)
                         all_created_ids.extend(ids)

@@ -67,9 +67,10 @@ class PDFExtractor:
                                 if not line:
                                     continue
                                 
-                                # Extract PO Number
+                                # Extract PO Number (reset promo flag for new PO)
                                 if po_match := re.search(r'PO\s*No\.?\s*:?\s*(\d+)', line, re.IGNORECASE):
                                     current_po['PO No.'] = po_match.group(1)
+                                    current_po.pop('is_promotional', None)
                                 
                                 # Extract Store Name and Store ID
                                 if store_match := re.search(r'Store\s*:?\s*(.*?)\s*-\s*(\d{3})\b', line, re.IGNORECASE):
@@ -82,7 +83,13 @@ class PDFExtractor:
                                 
                                 if delivery_date_match := re.search(r'Delivery\s*Date.*?:?\s*(\d{1,2}/\d{1,2}/\d{4})', line, re.IGNORECASE):
                                     current_po['Delivery Date'] = delivery_date_match.group(1)
-                                
+
+                                # Detect PO type: (PROMOTION) vs (GENERAL)
+                                if re.search(r'\(PROMOTION\)', line, re.IGNORECASE):
+                                    current_po['is_promotional'] = True
+                                elif re.search(r'\(GENERAL\)', line, re.IGNORECASE):
+                                    current_po['is_promotional'] = False
+
                                 # Parse item lines - Pattern: Starts with 6 digits (Internal Reference)
                                 if 'PO No.' in current_po and re.match(r'^\d{6}\b', line):
                                     parts = line.split()
@@ -158,7 +165,8 @@ class PDFExtractor:
                                                 'Size': size,
                                                 'Pack': pack,
                                                 '# of Order': ordered_qty,
-                                                'Price': price
+                                                'Price': price,
+                                                'is_promotional': current_po.get('is_promotional', False),
                                             }
                                             data.append(item_data)
                             

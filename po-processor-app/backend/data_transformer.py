@@ -183,6 +183,7 @@ class DataTransformer:
                     'units_per_order': units_per_order,
                     'original_qty': total_ordered_qty,
                     'po_unit_price': po_price,
+                    'is_promotional': bool(row.get('is_promotional', False)),
 
                     # Calculated for Odoo
                     'product_uom_qty': units_this_product,

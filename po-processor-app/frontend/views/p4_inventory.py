@@ -118,6 +118,9 @@ def render(settings: dict):
         if col not in st.session_state["line_details"].columns:
             st.session_state["line_details"][col] = None
 
+    if "is_promotional" not in st.session_state["line_details"].columns:
+        st.session_state["line_details"]["is_promotional"] = False
+
     # ── Order Summaries (live, reflects flagged / deleted lines) ──────────────
     live_summaries = _compute_live_summaries(settings)
     st.session_state["order_summaries"] = live_summaries  # keep Export in sync
@@ -400,9 +403,9 @@ def _render_warehouse_tab(warehouse_code: str):
         st.info(t("transform.wh.empty", warehouse=warehouse_code))
         return
 
-    editable_cols = ["price_unit", "product_uom_qty", "flagged"]
+    editable_cols = ["price_unit", "product_uom_qty", "flagged", "is_promotional"]
     full_cols = [
-        "store_id", "store_name", "product_image", "price_unit",
+        "store_id", "store_name", "product_image", "is_promotional", "price_unit",
         "product_uom_qty", "flagged", "odoo_available", "odoo_on_hand",
         "store_on_hand", "hist_avg_sales", "flag_reason", "shortage_details",
         "barcode", "internal_reference", "po_number", "product_name",
@@ -515,6 +518,7 @@ def _render_warehouse_tab(warehouse_code: str):
         height=800,
         column_config={
             "product_image": st.column_config.ImageColumn(t("transform.col.image"), width="small"),
+            "is_promotional": st.column_config.CheckboxColumn(t("transform.col.promo"), width="small"),
             "product_uom_qty": st.column_config.NumberColumn(t("transform.col.qty"), min_value=0, step=1),
             "price_unit": st.column_config.NumberColumn(t("transform.col.price"), min_value=0.01, format="$%.2f"),
             "flagged": st.column_config.CheckboxColumn(t("transform.col.flagged")),

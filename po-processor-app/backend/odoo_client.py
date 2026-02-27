@@ -132,7 +132,10 @@ class OdooClient:
             logger.error(f"Error creating Sales Order: {e}")
             raise e
 
-    def create_sales_order_line(self, order_id: int, product_id: int, qty: float, price_unit: float) -> int:
+    def create_sales_order_line(
+        self, order_id: int, product_id: int, qty: float,
+        price_unit: float, promo_unit_price: float | None = None,
+    ) -> int:
         """Create a Sales Order Line"""
         if not self.connected:
             raise ConnectionError("Not connected to Odoo")
@@ -145,6 +148,10 @@ class OdooClient:
                 'price_unit': price_unit,
                 'x_studio_price_lock': True,
             }
+            if promo_unit_price is not None and not (
+                isinstance(promo_unit_price, float) and promo_unit_price != promo_unit_price
+            ):
+                vals['x_studio_promotion_unit_price'] = promo_unit_price
 
             line_id = self.models.execute_kw(
                 self.db, self.uid, self.api_key,
@@ -414,6 +421,7 @@ class OdooClient:
                     product_id=line['product_id'],
                     qty=line['product_uom_qty'],
                     price_unit=line['price_unit'],
+                    promo_unit_price=line.get('promo_unit_price'),
                 )
                 created_ids.append(line_id)
             except Exception as e:
