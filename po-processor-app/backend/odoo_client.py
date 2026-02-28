@@ -633,6 +633,240 @@ class OdooClient:
             logger.error(f"Error confirming credit note {move_id}: {e}")
             return False
 
+    # -- Payment Reconciliation Methods -----------------------------------------
+
+    def search_invoices_by_name(self, refs: List[str]) -> List[Dict[str, Any]]:
+        """Search account.move (invoices) by name pattern.
+
+        Invoice names follow the format ``INV-OATS003771`` for SO ``OATS003771``.
+        For each ref we search ``name ilike %ref%``.
+
+        Returns list of dicts with invoice fields.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        fields = [
+            "id", "name", "ref", "invoice_origin", "move_type",
+            "state", "partner_id", "invoice_date", "amount_total",
+            "payment_state",
+        ]
+        results: List[Dict[str, Any]] = []
+        try:
+            for ref in refs:
+                domain = [
+                    ["move_type", "=", "out_invoice"],
+                    ["name", "ilike", ref],
+                ]
+                matches = self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    "account.move", "search_read",
+                    [domain],
+                    {"fields": fields, "limit": 5},
+                )
+                results.extend(matches)
+
+            # Deduplicate by id
+            seen: set = set()
+            deduped: List[Dict[str, Any]] = []
+            for r in results:
+                if r["id"] not in seen:
+                    seen.add(r["id"])
+                    deduped.append(r)
+
+            logger.info(f"Found {len(deduped)} invoice(s) for {len(refs)} ref(s)")
+            return deduped
+        except Exception as e:
+            logger.error(f"Error searching invoices by name: {e}")
+            return []
+
+    def search_account_moves_by_pattern(
+        self,
+        ref_patterns: List[str],
+        move_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Search account.move by name OR ref ILIKE patterns.
+
+        Used for matching credit notes and returns where the reference
+        may appear in either the ``name`` or ``ref`` field.
+
+        Args:
+            ref_patterns: Substrings to search for (e.g. ``ASO0002206``).
+            move_type: Optional move_type filter (``out_refund`` for credit notes).
+
+        Returns list of dicts with account.move fields.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        fields = [
+            "id", "name", "ref", "invoice_origin", "move_type",
+            "state", "partner_id", "invoice_date", "amount_total",
+            "payment_state",
+        ]
+        results: List[Dict[str, Any]] = []
+        try:
+            for pattern in ref_patterns:
+                # Odoo uses Polish (prefix) notation for domains:
+                # "|" applies OR to the next two leaf conditions.
+                # Prepending a move_type filter creates an implicit AND
+                # (consecutive leaves without an operator are ANDed).
+                domain: list = [
+                    "|",
+                    ["name", "ilike", pattern],
+                    ["ref", "ilike", pattern],
+                ]
+                if move_type:
+                    domain = [["move_type", "=", move_type]] + domain
+                matches = self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    "account.move", "search_read",
+                    [domain],
+                    {"fields": fields, "limit": 5},
+                )
+                results.extend(matches)
+
+            # Deduplicate by id
+            seen: set = set()
+            deduped: List[Dict[str, Any]] = []
+            for r in results:
+                if r["id"] not in seen:
+                    seen.add(r["id"])
+                    deduped.append(r)
+
+            logger.info(
+                f"Found {len(deduped)} account.move(s) for {len(ref_patterns)} pattern(s)"
+            )
+            return deduped
+        except Exception as e:
+            logger.error(f"Error searching account moves by pattern: {e}")
+            return []
+
+    # -- Batch Payment Creation Methods ------------------------------------------
+
+    def get_bank_journals(self) -> List[Dict[str, Any]]:
+        """Fetch bank-type journals for the payment journal selectbox."""
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            journals = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                "account.journal", "search_read",
+                [[["type", "=", "bank"]]],
+                {"fields": ["id", "name"]},
+            )
+            logger.info(f"Found {len(journals)} bank journal(s)")
+            return journals
+        except Exception as e:
+            logger.error(f"Error fetching bank journals: {e}")
+            return []
+
+    def get_payment_method_line(
+        self,
+        journal_id: int,
+        payment_type: str,
+        code: str = "check_printing",
+    ) -> Optional[int]:
+        """Find a payment method line for a journal + payment type.
+
+        Args:
+            journal_id: Bank journal ID.
+            payment_type: ``"inbound"`` or ``"outbound"``.
+            code: Payment method code (falls back to ``"manual"``).
+
+        Returns:
+            ``account.payment.method.line`` ID or ``None``.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            for attempt_code in (code, "manual"):
+                domain = [
+                    ["journal_id", "=", journal_id],
+                    ["payment_type", "=", payment_type],
+                    ["code", "=", attempt_code],
+                ]
+                results = self.models.execute_kw(
+                    self.db, self.uid, self.api_key,
+                    "account.payment.method.line", "search_read",
+                    [domain],
+                    {"fields": ["id", "name"], "limit": 1},
+                )
+                if results:
+                    logger.info(
+                        f"Payment method line: {results[0]['name']} "
+                        f"(id={results[0]['id']}, code={attempt_code})"
+                    )
+                    return results[0]["id"]
+
+            logger.warning(
+                f"No payment method line found for journal {journal_id} / {payment_type}"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"Error finding payment method line: {e}")
+            return None
+
+    def create_payment(self, vals: Dict[str, Any]) -> Optional[int]:
+        """Create a draft ``account.payment`` record.
+
+        The payment is NOT posted — staff review in Odoo before confirming.
+
+        Returns:
+            Payment ID or ``None`` on failure.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            payment_id = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                "account.payment", "create",
+                [vals],
+            )
+            logger.info(f"Created draft payment {payment_id}: {vals.get('ref', '')}")
+            return payment_id
+        except Exception as e:
+            logger.error(f"Error creating payment: {e}")
+            return None
+
+    def create_batch_payment(
+        self,
+        name: str,
+        journal_id: int,
+        payment_ids: List[int],
+    ) -> Optional[int]:
+        """Create an ``account.batch.payment`` grouping multiple payments.
+
+        If the model is unavailable (e.g. Community edition), logs a
+        warning and returns ``None`` gracefully.
+
+        Returns:
+            Batch payment ID or ``None``.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to Odoo")
+
+        try:
+            batch_id = self.models.execute_kw(
+                self.db, self.uid, self.api_key,
+                "account.batch.payment", "create",
+                [{
+                    "name": name,
+                    "journal_id": journal_id,
+                    "payment_ids": [[6, 0, payment_ids]],
+                }],
+            )
+            logger.info(
+                f"Created batch payment {batch_id}: {name} ({len(payment_ids)} payments)"
+            )
+            return batch_id
+        except Exception as e:
+            logger.warning(f"Could not create batch payment (model may be unavailable): {e}")
+            return None
+
     def create_return_transfer(self, move_id: int, action_id: int = 1443) -> bool:
         """Run the [AT] Create Return Transfer server action on a credit note."""
         if not self.connected:

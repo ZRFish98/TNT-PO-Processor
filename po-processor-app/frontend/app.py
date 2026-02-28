@@ -135,6 +135,14 @@ _DEFAULTS = {
     "return_details": pd.DataFrame(),
     "return_extraction_errors": [],
     "return_unmatched": [],
+    # Payment Reconciler
+    "payment_pdf_bytes": None,
+    "payment_statement": None,
+    "payment_matched": False,
+    "payment_matched_lines": [],
+    "payment_bank_journals": None,
+    "payment_batches_created": False,
+    "payment_batch_results": None,
 }
 
 for k, v in _DEFAULTS.items():
@@ -265,6 +273,7 @@ st.markdown(f"""
 import frontend.views.po_processor as _po_processor
 import frontend.views.invoice_verification as _invoice_verification
 import frontend.views.return_processor as _return_processor
+import frontend.views.payment_reconciler as _payment_reconciler
 import frontend.views.p1_settings as _p1_settings
 
 _po_page = st.Page(
@@ -286,6 +295,12 @@ _return_page = st.Page(
     icon=":material/undo:",
     url_path="return-processor",
 )
+_payment_page = st.Page(
+    lambda: _payment_reconciler.render(settings),
+    title=t("nav.payment_reconciler"),
+    icon=":material/account_balance:",
+    url_path="payment-reconciler",
+)
 _settings_page = st.Page(
     lambda: _p1_settings.render(settings, _gmail_monitor),
     title=t("nav.settings"),
@@ -294,7 +309,7 @@ _settings_page = st.Page(
 )
 
 pg = st.navigation({
-    t("nav.workflows"): [_po_page, _invoice_page, _return_page],
+    t("nav.workflows"): [_po_page, _invoice_page, _return_page, _payment_page],
     "": [_settings_page],
 })
 pg.run()
