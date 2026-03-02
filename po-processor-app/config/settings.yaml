@@ -53,6 +53,7 @@ tt_store_names:
   38: 'T&T Supermarket Inc., Downtown Store - 038'
   39: 'T&T Supermarket Inc., Kanata Store - 039'
   40: 'T&T Supermarket Inc., Brossard Store - 040'
+  42: 'T&T Supermarket Inc., Erin Mills Store - 042'
 
 # 2-letter store codes used in T&T payment statement references
 # e.g. "CAG5-OATS002158" -> CA = store 7 (Calgary)
@@ -76,4 +77,5 @@ payment_store_codes:
   OP: 19
   SE: 24
   SG: 33
+  RW: 42
   SU: 6

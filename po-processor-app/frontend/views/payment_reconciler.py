@@ -369,6 +369,23 @@ def _render_reconcile(settings: Dict) -> None:
 
     st.divider()
 
+    # Refresh button — re-match after user edits in Odoo
+    if st.button(
+        t("payment.reconcile.btn_refresh"),
+        key="btn_payment_refresh",
+        icon=":material/refresh:",
+    ):
+        with st.spinner(
+            t("payment.reconcile.matching", count=len(statement.lines))
+        ):
+            matched_lines = _match_with_odoo(statement, client)
+            st.session_state["payment_matched_lines"] = matched_lines
+            st.session_state["payment_matched"] = True
+            # Reset batch creation guard since data changed
+            st.session_state.pop("payment_batches_created", None)
+            st.session_state.pop("payment_batch_results", None)
+        st.rerun()
+
     # Filters
     fc1, fc2 = st.columns(2)
 

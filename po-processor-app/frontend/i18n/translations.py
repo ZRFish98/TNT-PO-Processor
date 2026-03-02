@@ -503,6 +503,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "payment.reconcile.no_data": "No payment data. Upload a payment statement first.",
         "payment.reconcile.no_odoo": "Connect to Odoo first (Settings page).",
         "payment.reconcile.btn_match": "Match with Odoo",
+        "payment.reconcile.btn_refresh": "Refresh from Odoo",
         "payment.reconcile.matching": "Matching {count} line items against Odoo...",
         "payment.reconcile.done": "Matched {matched} of {total}. {mismatches} amount mismatches, {not_found} not found.",
 
@@ -1072,6 +1073,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "payment.reconcile.no_data": "\u65e0\u4ed8\u6b3e\u6570\u636e\u3002\u8bf7\u5148\u4e0a\u4f20\u4ed8\u6b3e\u5bf9\u8d26\u5355\u3002",
         "payment.reconcile.no_odoo": "\u8bf7\u5148\u8fde\u63a5 Odoo\uff08\u8bbe\u7f6e\u9875\u9762\uff09\u3002",
         "payment.reconcile.btn_match": "\u4e0e Odoo \u5339\u914d",
+        "payment.reconcile.btn_refresh": "\u4ece Odoo \u5237\u65b0",
         "payment.reconcile.matching": "\u6b63\u5728\u5339\u914d {count} \u4e2a\u884c\u9879...",
         "payment.reconcile.done": "\u5df2\u5339\u914d {matched}/{total}\u3002{mismatches} \u4e2a\u91d1\u989d\u4e0d\u5339\u914d\uff0c{not_found} \u4e2a\u672a\u627e\u5230\u3002",
 
